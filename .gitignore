@@ -9,3 +9,6 @@ work/
 outputs/
 .DS_Store
 *.log
+
+*.tsbuildinfo
+extension/node_modules/

@@ -28,7 +28,7 @@ export function createGateway(deps:Dependencies){return async(req:Request):Promi
   const {data:owner,error:ownerError}=await db.from('users').select('account_status').eq('user_id',uid).maybeSingle();
   if(ownerError)throw new GatewayError(503,'The account could not be checked.');
   if(!owner)throw new GatewayError(403,'This account has not been provisioned for the platform.');
-  async function remaining(){const start=new Date();start.setUTCHours(0,0,0,0);const [limits,logs]=await Promise.all([db.from('ai_user_limits').select('daily_cap').eq('user_id',uid).single(),db.from('ai_call_log').select('weight').eq('user_id',uid).gte('created_at',start.toISOString())]);if(limits.error||logs.error)throw new GatewayError(503,'The usage counter could not be read.');return Math.max(0,limits.data.daily_cap-logs.data.reduce((n:number,r:any)=>n+r.weight,0));}
+  async function remaining(){const {data,error}=await db.rpc('ai_remaining',{p_user_id:uid});if(error||!Number.isInteger(data))throw new GatewayError(503,'The usage counter could not be read.');return data as number;}
   async function run(input:GatewayInput,id:string):Promise<string>{
    const {data:registered,error}=await db.from('ai_config').select('*').eq('feature',input.feature).maybeSingle();
    if(error)throw new GatewayError(503,'The feature registry could not be read.');
@@ -63,7 +63,8 @@ export function createGateway(deps:Dependencies){return async(req:Request):Promi
      if(new TextEncoder().encode(prepared.system+prepared.user).length+6000>config.max_prompt_bytes)throw new GatewayError(400,'Leave at least 6,000 prompt bytes for search context.');
      const childHash=await cacheKey(id,{...input,feature:'people_search',tools:[]},config);
      const childId=childHash.slice(0,8)+'-'+childHash.slice(8,12)+'-4'+childHash.slice(13,16)+'-8'+childHash.slice(17,20)+'-'+childHash.slice(20,32);
-     const searchText=await run({feature:'people_search',system:'',user:input.tools[0].query,maxTokens:64,tools:[]},childId);
+     const searchResponse=await run({feature:'people_search',system:'',user:input.tools[0].query,maxTokens:64,tools:[]},childId);
+     const searchText=JSON.stringify(JSON.parse(searchResponse).slice(0,5));
      prepared=clampPrompt({...input,user:input.user+'\n\nUnverified public search snippets:\n'+searchText,tools:[]},config);
     }
     if(config.provider==='google_search'){
@@ -78,10 +79,12 @@ export function createGateway(deps:Dependencies){return async(req:Request):Promi
     if(config.provider==='gemini')output=await gemini(prepared,config,providerKey,deps.fetcher);
     else if(config.provider==='astra')output=await astra(prepared,config,providerKey,deps.fetcher);
     else {
-     const endpoint=new URL('https://customsearch.googleapis.com/customsearch/v1');endpoint.searchParams.set('key',providerKey);endpoint.searchParams.set('cx',deps.env('GOOGLE_SEARCH_ENGINE_ID')!);endpoint.searchParams.set('q',input.user.slice(0,256));endpoint.searchParams.set('num','5');
+     let query=input.user;let start=1;
+     if(input.user.trim().startsWith('{')){let search;try{search=JSON.parse(input.user);}catch{throw new GatewayError(400,'Search input is invalid.');}if(typeof search.query!=='string'||search.query.length>256||!Number.isInteger(search.start)||search.start<1||search.start>91)throw new GatewayError(400,'Search input is invalid.');query=search.query;start=search.start;}
+     const endpoint=new URL('https://customsearch.googleapis.com/customsearch/v1');endpoint.searchParams.set('key',providerKey);endpoint.searchParams.set('cx',deps.env('GOOGLE_SEARCH_ENGINE_ID')!);endpoint.searchParams.set('q',query.slice(0,256));endpoint.searchParams.set('num','10');endpoint.searchParams.set('start',String(start));
      const response=await(deps.fetcher||fetch)(endpoint,{signal:AbortSignal.timeout(20000)});
      if(!response.ok)throw new ProviderError('Search provider request failed.',[400,401,403,429].includes(response.status));
-     const data=await response.json();const items=(data.items||[]).slice(0,5).map((x:any)=>({title:String(x.title||'').slice(0,160),url:String(x.link||'').slice(0,400),snippet:String(x.snippet||'').slice(0,400)}));
+     const data=await response.json();const items=(data.items||[]).slice(0,10).map((x:any)=>({title:String(x.title||'').slice(0,160),url:String(x.link||'').slice(0,400),snippet:String(x.snippet||'').slice(0,400)}));
      output={text:JSON.stringify(items),usage:{tokensIn:0,tokensOut:0,cachedTokensIn:0,cacheWriteTokensIn:0}};
     }
     const cost=priceUsage(output.usage,config);

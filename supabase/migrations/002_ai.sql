@@ -80,7 +80,7 @@ begin
  if f.tier='pro' and u.tier<>'pro' then raise exception 'Feature requires a different plan.' using errcode='42501'; end if;
  mt:=least(f.max_tokens,greatest(64,coalesce(p_max_tokens,f.max_tokens)));
  -- A conservative one-token-per-UTF8-byte input bound includes every prompt byte.
- bound:=((f.max_prompt_bytes+1024)*greatest(f.input_usd_per_million,f.cache_write_usd_per_million)+(mt+f.reasoning_token_allowance)*f.output_usd_per_million)/1000000+f.fixed_cost_usd;
+ bound:=((f.max_prompt_bytes+1024)*greatest(f.input_usd_per_million,f.cached_input_usd_per_million,f.cache_write_usd_per_million)+(mt+f.reasoning_token_allowance)*f.output_usd_per_million)/1000000+f.fixed_cost_usd;
  select coalesce(sum(weight),0) into daily from public.ai_call_log where user_id=p_user_id and created_at>=date_trunc('day',now() at time zone 'UTC') at time zone 'UTC';
  select coalesce(sum(case when pending then reserved_usd else cost_usd end),0) into monthly from public.ai_call_log where user_id=p_user_id and created_at>=date_trunc('month',now() at time zone 'UTC') at time zone 'UTC';
  select coalesce(sum(case when pending then reserved_usd else cost_usd end),0) into company from public.ai_call_log where created_at>=date_trunc('day',now() at time zone 'UTC') at time zone 'UTC';
@@ -132,6 +132,12 @@ revoke all on function public.ai_confirm_call(uuid,integer,integer,numeric,integ
 revoke all on function public.ai_release_call(uuid,boolean) from public,anon,authenticated;
 grant execute on function public.ai_precheck(uuid,text,integer),public.ai_reserve_call(text,uuid,uuid,integer),public.ai_confirm_call(uuid,integer,integer,numeric,integer,integer),public.ai_release_call(uuid,boolean) to service_role;
 grant all on public.ai_config,public.ai_user_limits,public.ai_company_budget,public.ai_call_log,public.ai_cache to service_role;
+
+create function public.ai_remaining(p_user_id uuid) returns integer language sql stable security definer set search_path='' as $$
+ select greatest(0,l.daily_cap-coalesce((select sum(weight) from public.ai_call_log where user_id=p_user_id and created_at>=date_trunc('day',now() at time zone 'UTC') at time zone 'UTC'),0))::integer from public.ai_user_limits l where l.user_id=p_user_id;
+$$;
+revoke all on function public.ai_remaining(uuid) from public,anon,authenticated;
+grant execute on function public.ai_remaining(uuid) to service_role;
 
 -- Disabled until current rates, model availability, and no-training controls are verified.
 insert into public.ai_config(feature,provider,model,tier,weight,cache_ttl_days,input_usd_per_million,cached_input_usd_per_million,output_usd_per_million) values
