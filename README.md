@@ -8,7 +8,7 @@ Mighty helps a person turn a networking intention into a relationship they conti
 
 Requires Node.js 22 or newer. Run `npm ci`, copy `.env.example` to `.env`, set the public Supabase URL and publishable key, then run `npm run dev`. Only public values belong in `VITE_` variables. No model key, service key, raw archive, or mailbox belongs in Git.
 
-`npm test` runs parser, database isolation, metering, search, and telemetry checks. `npm run build` checks application types and creates the production bundle.
+`npm test` runs parser, database isolation, metering, search, and telemetry checks. `npm run test:ui` covers account transitions and save/draft regressions; `npm run test:extension` covers the extension and popup. `npm run build` checks application types and packages both the production app and versioned extension download.
 
 ## Backend
 
@@ -29,3 +29,7 @@ AI synthesis references original evidence and cannot update it. Search snippets 
 ## Hackathon checkpoint
 
 See [CHECKPOINTS.md](CHECKPOINTS.md) for the submission context, demo story, and verified versus pending acceptance checks. Credentials, personal files, and generated test output are excluded from source control.
+
+## Design and content
+
+The approved warm Mighty concepts are implemented with a bundled Schibsted Grotesk font. See [CONTENT-REVIEW.md](CONTENT-REVIEW.md) for the critique, condensed wording, and remaining product choices.

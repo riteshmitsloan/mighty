@@ -1,3 +1,4 @@
+import {Search} from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
 import {
   askMighty,
@@ -11,6 +12,8 @@ import type { GatewayCall } from '../lib/platform';
 import './DiscoverPanel.css';
 
 export type DiscoverPanelProps = {
+  focusRequest?: number;
+  mode?: 'explore' | 'ask';
   all: Connection[];
   strategy: string;
   employers: string[];
@@ -52,9 +55,11 @@ function messageOf(error: unknown): string {
 }
 
 export default function DiscoverPanel({
-  all, strategy, employers, savedUrls, call, onSave, onRemaining,
+  all, strategy, employers, savedUrls, call, onSave, onRemaining, focusRequest = 0, mode = 'explore',
 }: DiscoverPanelProps) {
   const id = useId();
+  const inputRef = useRef<HTMLInputElement>(null);
+  useEffect(() => {if (focusRequest) inputRef.current?.focus();}, [focusRequest]);
   const [query, setQuery] = useState('');
   const [busy, setBusy] = useState<Busy>(null);
   const [routeMessage, setRouteMessage] = useState('');
@@ -158,9 +163,9 @@ export default function DiscoverPanel({
         const result = await askMighty(submittedQuery, all, strategy, employers, meteredCall);
         if (isCurrent(current)) setAnswer({ query: submittedQuery, ...result });
       } else if (route === 'rooms') {
-        setRouteMessage('Events search is not configured yet. You can search for a person or ask about your professional relationships.');
+        setRouteMessage('Event search is not available yet. Try a role, company, or relationship question.');
       } else {
-        setRouteMessage('Your imported connections are shown below. Web search starts only when you choose it.');
+        setRouteMessage('');
       }
     } catch (error) {
       if (!(error instanceof StaleRequest) && isCurrent(current)) setRequestError(messageOf(error));
@@ -242,40 +247,36 @@ export default function DiscoverPanel({
   const visibleWeb = web?.people.slice(webPage * 5, webPage * 5 + 5) || [];
   const nextPageCount = web ? Math.min(5, Math.max(0, web.people.length - (webPage + 1) * 5)) : 0;
 
-  return <section className="discover-panel" aria-labelledby={id + '-heading'}>
+  return <section className={`discover-panel ${web ? 'has-web' : ''}`} aria-label={mode === 'ask' ? 'Ask Mighty' : 'Find people'}>
     <div className="panel discover-search">
-      <div>
-        <p className="eyebrow">START WITH YOUR INTENTION</p>
-        <h2 id={id + '-heading'}>Who would help you move forward?</h2>
-        <p className="discover-muted">Search your imported connections or work through a question about your relationships.</p>
-      </div>
       <form onSubmit={event => void submit(event)} aria-busy={busy === 'route'}>
-        <label htmlFor={id + '-query'}>A person, a field, or a question</label>
-        <div className="discover-input-row">
+        <label className="sr-only" htmlFor={id + '-query'}>A role, company, or professional question</label>
+        <div className="discover-input-row"><Search size={18} aria-hidden="true"/>
           <input
+            ref={inputRef}
             id={id + '-query'}
             type="search"
             value={query}
             onChange={event => updateQuery(event.target.value)}
-            placeholder="Healthcare product leaders, or how should I reconnect?"
+            placeholder={mode === 'ask' ? 'Ask about your professional relationships' : 'Describe who you are looking for'}
             aria-describedby={id + '-help'}
             maxLength={2000}
             autoComplete="off"
             required
           />
           <button type="submit" className="button primary" disabled={!hasQuery || busy !== null}>
-            {busy === 'route' ? 'Working…' : 'Explore'}
+            {busy === 'route' ? 'Working…' : mode === 'ask' ? 'Ask' : 'Search'}
           </button>
         </div>
-        <p id={id + '-help'} className="discover-muted discover-small">Your imported connections appear as you type. Local matching is free.</p>
+        <p id={id + '-help'} className="discover-muted discover-small">Searches your imported connections as you type.</p>
       </form>
       <div className="discover-web-action">
         <div>
-          <strong>Look beyond your imported connections</strong>
-          <p className="discover-muted discover-small">Web search is optional and uses your daily search allowance.</p>
+          <strong>Beyond your network</strong>
+          <p className="discover-muted discover-small">Web search has a daily limit.</p>
         </div>
         <button type="button" className="button secondary" onClick={() => void searchWeb(1)} disabled={!hasQuery || busy !== null}>
-          {busy === 'web' ? 'Searching…' : 'Search LinkedIn on the web'}
+          {busy === 'web' ? 'Searching…' : 'Search the web'}
         </button>
       </div>
       {routeMessage && <p className="discover-info" role="status">{routeMessage}</p>}
@@ -284,20 +285,18 @@ export default function DiscoverPanel({
     </div>
 
     {answer && <section className="panel discover-answer" aria-labelledby={id + '-answer'}>
-      <h2 id={id + '-answer'}>A next step to consider</h2>
-      <p className="discover-muted discover-small">Your question: {answer.query}</p>
+      <h2 id={id + '-answer'}>Mighty</h2>
       <div className="discover-answer-text">{answer.text}</div>
-      <p className="discover-muted discover-small">Relevant imported records supplied: {answer.matchedCount}. Suggestions still need your judgment.</p>
     </section>}
 
     <section className="panel discover-results" aria-labelledby={id + '-local'}>
       <div className="discover-section-heading">
-        <div><h2 id={id + '-local'}>Your imported connections</h2><p className="discover-muted discover-small">Reasons come from the company and role recorded in your archive.</p></div>
+        <div><h2 id={id + '-local'}>Your network</h2></div>
         {hasQuery && <span className="pill">{matches.length} {matches.length === 1 ? 'match' : 'matches'}</span>}
       </div>
-      {!hasQuery ? <p className="discover-empty">Enter a role, company, or field to search your connections.</p> :
-        !all.length ? <p className="discover-empty">There are no imported connections to search yet. Add your own LinkedIn archive in the app.</p> :
-          !matches.length ? <p className="discover-empty">No imported company or role matches these words. That does not establish whether someone could help; their record may be incomplete.</p> :
+      {!hasQuery ? <p className="discover-empty">Search by company or role.</p> :
+        !all.length ? <p className="discover-empty">Import your LinkedIn archive in Me to search your network.</p> :
+          !matches.length ? <p className="discover-empty">No company or role matches. Try different words.</p> :
             <ul className="discover-list">
               {matches.slice(0,100).map(match => {
                 const person = match.person;
@@ -308,7 +307,7 @@ export default function DiscoverPanel({
                     <h3>{url ? <a href={url} target="_blank" rel="noopener noreferrer">{person.person}</a> : person.person}</h3>
                     {headline && <p className="discover-muted">{headline}</p>}
                     <p className="discover-reason">{match.reason}</p>
-                    <span className="pill">From your archive</span>
+
                   </div>
                   {saveAction(person, match.reason)}
                 </li>;
@@ -319,10 +318,10 @@ export default function DiscoverPanel({
 
     {web && <section className="panel discover-results" aria-labelledby={id + '-web'} aria-busy={busy === 'web'}>
       <div className="discover-section-heading">
-        <div><h2 id={id + '-web'}>Public search results</h2><p className="discover-muted discover-small">Results for “{web.query}”. Search snippets can be incomplete or out of date.</p></div>
-        <span className="pill">No score yet</span>
+        <div><h2 id={id + '-web'}>Public search results</h2><p className="discover-muted discover-small">Read a profile with the extension to see its fit.</p></div>
+        <span className="pill neutral">No score yet</span>
       </div>
-      {!web.people.length ? <p className="discover-empty">This search returned no usable LinkedIn profile links. Try different words.</p> :
+      {!web.people.length ? <p className="discover-empty">No LinkedIn profiles found. Try different words.</p> :
         <>
           <ul className="discover-list">
             {visibleWeb.map(person => {
@@ -331,16 +330,15 @@ export default function DiscoverPanel({
                 profile_url: person.url,
                 context: { source: 'web_search', searchHeadline: person.headline, searchSnippet: person.snippet, profile_read_at: null },
               };
-              const reason = 'Saved from your web search for “' + web.query + '”. This profile has not been read; search details are incomplete and unverified.';
+              const reason = 'Saved from your web search for “' + web.query + '”. Profile not yet read.';
               return <li key={person.url} className="discover-person discover-web-person">
                 <div className="discover-person-main">
                   <h3><a href={person.url} target="_blank" rel="noopener noreferrer">{person.name.trim() || 'Name unavailable in this search result'}</a></h3>
                   {person.headline && <p className="discover-muted">{person.headline}</p>}
                   {person.snippet ? <p className="discover-snippet">{person.snippet}</p> : <p className="discover-muted">No snippet was returned.</p>}
-                  <p className="discover-muted">No score yet. Add them, then open the profile with Mighty to complete it.</p>
                   <details className="discover-brief-help">
                     <summary>Why no brief yet?</summary>
-                    <p>Only a public search result is available. Open the actual LinkedIn profile and read it with the extension before requesting a brief. A snippet cannot establish goal fit or replace a profile read.</p>
+                    <p>Briefs need a complete profile read. Open the LinkedIn profile with the extension, then save it.</p>
                   </details>
                 </div>
                 {saveAction(connection, reason, Boolean(person.name.trim()))}
@@ -348,17 +346,17 @@ export default function DiscoverPanel({
             })}
           </ul>
           <div className="discover-pagination">
-            <p className="discover-muted discover-small">Showing {webPage * 5 + 1} to {webPage * 5 + visibleWeb.length} of {web.people.length} results from this batch.</p>
+            <p className="discover-muted discover-small">Showing {webPage * 5 + 1} to {webPage * 5 + visibleWeb.length} of {web.people.length}.</p>
             <div>
               {webPage > 0 && <button type="button" className="button secondary" onClick={() => setWebPage(page => page - 1)}>Previous 5</button>}
               {nextPageCount > 0 && <button type="button" className="button secondary" onClick={() => setWebPage(page => page + 1)}>Show next {nextPageCount}</button>}
             </div>
           </div>
           <div className="discover-more">
-            {nextPageCount > 0 ? <p className="discover-muted discover-small">The next five are already loaded. Showing them makes no new web request.</p> : web.start < 91 ? <>
+            {nextPageCount > 0 ? <p className="discover-muted discover-small">Next results are free.</p> : web.start < 91 ? <>
               <button type="button" className="button secondary" onClick={() => void searchWeb(web.start + 10)} disabled={busy !== null}>Search for more</button>
-              <p className="discover-muted discover-small">Starts another web request. Showing the next five above uses the results already loaded.</p>
-            </> : <p className="discover-muted discover-small">This search has reached the last available batch. Refine the query to look again.</p>}
+              <p className="discover-muted discover-small">Uses another web search.</p>
+            </> : <p className="discover-muted discover-small">Last batch reached. Try a more specific search.</p>}
           </div>
         </>}
     </section>}

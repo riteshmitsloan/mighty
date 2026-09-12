@@ -1,8 +1,23 @@
+import {sanitizeProviderDiagnostic,type ProviderDiagnosticEvent} from '../_shared/provider-diagnostics.ts';
 import {cacheKey,clampPrompt,GatewayError,parseBody,priceUsage,ProviderError,type Config,type GatewayInput,type ProviderResult} from '../_shared/contracts.ts';
 import {gemini} from './adapters/gemini.ts';
 import {astra} from './adapters/astra.ts';
-type Dependencies={env:(key:string)=>string|undefined;client:(url:string,key:string)=>any;fetcher?:typeof fetch};
+type Dependencies={env:(key:string)=>string|undefined;client:(url:string,key:string)=>any;fetcher?:typeof fetch;diagnostic?:(event:ProviderDiagnosticEvent)=>void};
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+type PeopleSearchInput={query:string;start:number};
+/** Accept the public JSON envelope or the existing tool's plain query; validate before spend. */
+function peopleSearchInput(value:string):PeopleSearchInput{
+ const text=value.trim();let query=text;let start=1;
+ if(text.startsWith('{')||text.startsWith('[')){
+  let parsed:unknown;try{parsed=JSON.parse(text);}catch{throw new GatewayError(400,'Search input must contain valid JSON.');}
+  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed)||Object.keys(parsed).some(key=>!['query','start'].includes(key)))throw new GatewayError(400,'Search input must contain only query and start.');
+  const search=parsed as Record<string,unknown>;
+  if(typeof search.query!=='string'||!Number.isInteger(search.start)||Number(search.start)<1||Number(search.start)>91)throw new GatewayError(400,'Search requires a query and an integer start from 1 to 91.');
+  query=search.query.trim();start=Number(search.start);
+ }
+ if(!query||query.length>256)throw new GatewayError(400,'Search query must contain between 1 and 256 characters.');
+ return {query,start};
+}
 async function boundedJSON(req:Request){const reader=req.body?.getReader();if(!reader)throw new GatewayError(400,'A JSON body is required.');let length=0;const chunks:Uint8Array[]=[];while(true){const {value,done}=await reader.read();if(done)break;length+=value.length;if(length>96000){await reader.cancel();throw new GatewayError(400,'The request is too large.');}chunks.push(value);}const buffer=new Uint8Array(length);let offset=0;for(const c of chunks){buffer.set(c,offset);offset+=c.length;}try{return JSON.parse(new TextDecoder().decode(buffer));}catch{throw new GatewayError(400,'The body must contain valid JSON.');}}
 function sqlError(error:any){const m=String(error?.message||'');if(/limit|ceiling|budget/i.test(m))return new GatewayError(429,m,'budget_refused');if(/already reserved/i.test(m))return new GatewayError(409,'This request already exists. It will not be sent to the model again.','duplicate_request');if(/locked|plan|limits are not configured/i.test(m))return new GatewayError(403,m,'account_unavailable');return new GatewayError(503,'The metering service could not reserve this request.','metering_unavailable');}
 export function createGateway(deps:Dependencies){return async(req:Request):Promise<Response>=>{
@@ -16,6 +31,7 @@ export function createGateway(deps:Dependencies){return async(req:Request):Promi
  try{
   // Validate shape before auth so malformed bodies consistently return 400, without touching data.
   const raw=parseBody(await boundedJSON(req));
+  if(raw.feature==='people_search')peopleSearchInput(raw.user);
   const token=req.headers.get('authorization')?.match(/^Bearer (.+)$/i)?.[1];
   if(!token)return reply(401,{error:'unauthorized',message:'A signed-in account is required.'});
   const url=deps.env('SUPABASE_URL'),key=deps.env('SUPABASE_SERVICE_ROLE_KEY');
@@ -30,10 +46,12 @@ export function createGateway(deps:Dependencies){return async(req:Request):Promi
   if(!owner)throw new GatewayError(403,'This account has not been provisioned for the platform.');
   async function remaining(){const {data,error}=await db.rpc('ai_remaining',{p_user_id:uid});if(error||!Number.isInteger(data))throw new GatewayError(503,'The usage counter could not be read.');return data as number;}
   async function run(input:GatewayInput,id:string):Promise<string>{
+   let searchInput=input.feature==='people_search'?peopleSearchInput(input.user):undefined;
    const {data:registered,error}=await db.from('ai_config').select('*').eq('feature',input.feature).maybeSingle();
    if(error)throw new GatewayError(503,'The feature registry could not be read.');
    if(!registered)throw new GatewayError(400,'This feature is not registered.');
    let config=registered as Config;
+   if(config.provider==='google_search')searchInput=peopleSearchInput(input.user);
    if(!config.enabled||config.rates_valid_until<new Date().toISOString().slice(0,10))throw new GatewayError(503,'This feature is not enabled with current pricing.');
    let prepared=clampPrompt(input,config);let hash=await cacheKey(uid,prepared,config);
    if(Number(config.cache_ttl_days)>0){
@@ -53,8 +71,9 @@ export function createGateway(deps:Dependencies){return async(req:Request):Promi
    try{
     // Use the config snapshot returned by the same transaction that reserved its cost.
     config=reservation.config;prepared=clampPrompt(input,config);hash=await cacheKey(uid,prepared,config);
+    if(config.provider==='google_search')searchInput=peopleSearchInput(input.user);
     // Keys and provider-specific policy checks use the authoritative reserved configuration.
-    const providerKey=deps.env(config.provider==='gemini'?'GEMINI_API_KEY':config.provider==='astra'?'OPENAI_API_KEY':'GOOGLE_SEARCH_API_KEY');
+    const providerKey=config.provider==='gemini'?(deps.env('GEMINI_API_KEY')?.trim()||deps.env('Gemini AOI Key')?.trim()):deps.env(config.provider==='astra'?'OPENAI_API_KEY':'GOOGLE_SEARCH_API_KEY')?.trim();
     if(!providerKey)throw new GatewayError(503,'The model provider is not configured.');
     if(config.provider==='gemini'&&deps.env('GEMINI_PAID_PROJECT_CONFIRMED')!=='true')throw new GatewayError(503,'Gemini requires a paid project with no training use.');
     if(config.provider==='google_search'&&(deps.env('GOOGLE_SEARCH_ENABLED')!=='true'||!deps.env('GOOGLE_SEARCH_ENGINE_ID')))throw new GatewayError(503,'Existing Google Programmable Search access is not configured.');
@@ -69,8 +88,8 @@ export function createGateway(deps:Dependencies){return async(req:Request):Promi
     }
     if(config.provider==='google_search'){
      const {data:quota,error:quotaError}=await db.rpc('claim_people_search');
-     if(quotaError)throw new GatewayError(503,'Search quota could not be checked.');
-     if(!quota.allowed)throw new GatewayError(429,quota.reason,'search_quota_refused');
+     if(quotaError||!quota||typeof quota.allowed!=='boolean')throw new GatewayError(503,'Search quota could not be checked.');
+     if(!quota.allowed)throw new GatewayError(429,typeof quota.reason==='string'?quota.reason:'Daily people search limit reached.','search_quota_refused');
     }
     const {error:dispatchError}=await db.from('ai_call_log').update({dispatched_at:new Date().toISOString()}).eq('id',id).eq('user_id',uid).eq('pending',true);
     if(dispatchError)throw new GatewayError(503,'The request could not be marked for dispatch.');
@@ -79,9 +98,9 @@ export function createGateway(deps:Dependencies){return async(req:Request):Promi
     if(config.provider==='gemini')output=await gemini(prepared,config,providerKey,deps.fetcher);
     else if(config.provider==='astra')output=await astra(prepared,config,providerKey,deps.fetcher);
     else {
-     let query=input.user;let start=1;
-     if(input.user.trim().startsWith('{')){let search;try{search=JSON.parse(input.user);}catch{throw new GatewayError(400,'Search input is invalid.');}if(typeof search.query!=='string'||search.query.length>256||!Number.isInteger(search.start)||search.start<1||search.start>91)throw new GatewayError(400,'Search input is invalid.');query=search.query;start=search.start;}
-     const endpoint=new URL('https://customsearch.googleapis.com/customsearch/v1');endpoint.searchParams.set('key',providerKey);endpoint.searchParams.set('cx',deps.env('GOOGLE_SEARCH_ENGINE_ID')!);endpoint.searchParams.set('q',query.slice(0,256));endpoint.searchParams.set('num','10');endpoint.searchParams.set('start',String(start));
+     // Already validated against the authoritative provider before quota claim or dispatch.
+     const {query,start}=searchInput!;
+     const endpoint=new URL('https://customsearch.googleapis.com/customsearch/v1');endpoint.searchParams.set('key',providerKey);endpoint.searchParams.set('cx',deps.env('GOOGLE_SEARCH_ENGINE_ID')!);endpoint.searchParams.set('q',query);endpoint.searchParams.set('num','10');endpoint.searchParams.set('start',String(start));
      const response=await(deps.fetcher||fetch)(endpoint,{signal:AbortSignal.timeout(20000)});
      if(!response.ok)throw new ProviderError('Search provider request failed.',[400,401,403,429].includes(response.status));
      const data=await response.json();const items=(data.items||[]).slice(0,10).map((x:any)=>({title:String(x.title||'').slice(0,160),url:String(x.link||'').slice(0,400),snippet:String(x.snippet||'').slice(0,400)}));
@@ -98,13 +117,14 @@ export function createGateway(deps:Dependencies){return async(req:Request):Promi
     }
     return output.text;
    }catch(e){
+    if(e instanceof ProviderError){const diagnostic=sanitizeProviderDiagnostic(e.diagnostic);if(diagnostic){try{deps.diagnostic?.({event:'ai_provider_failure',requestId:id,...diagnostic});}catch{/* Diagnostics must never interfere with confirmation or reservation release. */}}}
     if(!dispatched||(e instanceof ProviderError&&e.noCharge)){
-     const {error:releaseError}=await db.rpc('ai_release_call',{p_id:id,p_definitive_no_charge:e instanceof ProviderError&&e.noCharge});
-     if(releaseError)throw new GatewayError(503,'The failed request still has a pending reservation. Do not retry automatically.','release_pending');
+     const {data:released,error:releaseError}=await db.rpc('ai_release_call',{p_id:id,p_definitive_no_charge:e instanceof ProviderError&&e.noCharge});
+     if(releaseError||released!==true)throw new GatewayError(503,'The failed request still has a pending reservation. Do not retry automatically.','release_pending');
     }
     // Unknown provider outcomes retain reservations. Releasing them could bypass budgets.
     if(e instanceof GatewayError)throw e;
-    throw new GatewayError(502,dispatched&&!(e instanceof ProviderError&&e.noCharge)?'The provider outcome is uncertain. Its reservation is retained for reconciliation.':'The provider request failed without a charge.','provider_failed');
+    throw new GatewayError(502,dispatched&&!(e instanceof ProviderError&&e.noCharge)?'The provider outcome is uncertain. Its reservation is retained for reconciliation.':dispatched?'The provider rejected this request. Its reservation was released.':'The request failed before provider dispatch. Its reservation was released.','provider_failed');
    }
   }
   const text=await run(raw,requestId);

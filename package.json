@@ -9,10 +9,12 @@
     "build:extension": "node scripts/build-extension.mjs",
     "test": "tsx --test tests/*.test.ts",
     "install:ci": "npm ci",
-    "test:extension": "cd extension && node scripts/check.mjs && node scripts/test.mjs"
+    "test:extension": "cd extension && node scripts/check.mjs && node scripts/test.mjs && node --test tests/popup-render.test.mjs",
+    "test:ui": "node tests/ui/run.mjs"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",
+    "@fontsource-variable/schibsted-grotesk": "^5.3.0",
     "@supabase/supabase-js": "^2.57.4",
     "@zip.js/zip.js": "^2.14.1",
     "lucide-react": "^0.468.0",

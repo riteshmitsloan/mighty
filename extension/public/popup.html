@@ -1,1 +1,23 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Mighty</title><link rel="stylesheet" href="popup.css"></head><body><header><strong>Mighty.</strong><p>Mighty. Intentional, intelligent networking.</p></header><div id="account" class="account"></div><main id="content"><p>Reading the current tab…</p></main><p id="notice" role="status" aria-live="polite"></p><footer><button id="skip" type="button">Skip</button><button id="save" type="button" disabled>Save</button></footer><script src="popup.js"></script></body></html>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mighty</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <div class="brand"><span class="brand-mark" aria-hidden="true"><span></span><span></span></span><strong>Mighty</strong></div>
+  </header>
+  <div id="account" class="account"></div>
+  <main id="content" aria-busy="true"><p class="hint">Reading this page…</p></main>
+  <p id="notice" role="status" aria-live="polite"></p>
+  <footer>
+    <span id="selection-summary" class="selection-summary" aria-live="polite"></span>
+    <button id="skip" type="button">Skip</button>
+    <button id="save" type="button" disabled>Save</button>
+  </footer>
+  <script src="popup.js"></script>
+</body>
+</html>

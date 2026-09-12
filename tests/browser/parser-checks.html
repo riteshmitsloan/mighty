@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mighty parser browser checks</title>
+  <style>
+    :root { font-family: system-ui, sans-serif; color: #17342b; background: #f4f8f5; }
+    body { margin: 0; padding: 32px 18px; }
+    main { max-width: 920px; margin: auto; background: white; border: 1px solid #d8e4dc; border-radius: 20px; padding: 28px; }
+    h1 { margin-top: 0; font-size: 30px; }
+    p { line-height: 1.6; }
+    button { padding: 12px 18px; border: 0; border-radius: 9px; font: inherit; cursor: pointer; background: #176b47; color: white; }
+    button + button { margin-left: 8px; background: #8a3030; }
+    button:disabled { opacity: .5; cursor: default; }
+    #status { font-weight: 700; }
+    #status[data-state="passed"] { color: #176b47; }
+    #status[data-state="failed"], #status[data-state="stopped"] { color: #8a3030; }
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin: 20px 0; }
+    .metric { background: #f4f8f5; padding: 14px; border-radius: 10px; }
+    .metric span { display: block; font-size: 13px; }
+    .metric output { display: block; font-size: 23px; font-weight: 700; margin-top: 5px; }
+    progress { width: 100%; accent-color: #176b47; }
+    li { padding: 8px 0; line-height: 1.5; }
+    li[data-state="passed"] { color: #176b47; }
+    li[data-state="failed"] { color: #8a3030; }
+    #details { background: #f4f8f5; border-radius: 10px; padding: 16px; white-space: pre-wrap; line-height: 1.6; }
+    .note { color: #53685c; font-size: 14px; }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Mighty parser checks</h1>
+  <p>Run four checks in this browser: a generated ZIP with 19,000 connections, two mailboxes that exercise local storage and reply-time calculations, and a generated 2 GiB mailbox processed by the real mail worker.</p>
+  <p class="note">All inputs are synthetic. This page does not sign in, seed an account, call a backend, or read your files. The 2 GiB input repeats one 8 MiB Blob; browser backing-store behavior varies. Results describe this generated fixture, not a real user's archive.</p>
+  <button id="run" type="button">Run parser checks</button>
+  <button id="stop" type="button" disabled>Stop</button>
+  <p id="status" role="status" aria-live="polite" data-state="ready">Ready. The run stops after four minutes.</p>
+  <label for="overall">Checks completed</label><progress id="overall" max="4" value="0"></progress>
+  <p id="phase">No parser is running.</p>
+  <label for="bytes">Current input progress</label><progress id="bytes" max="1" value="0"></progress>
+  <div class="metrics">
+    <div class="metric"><span>Connections</span><output id="connections">0</output></div>
+    <div class="metric"><span>Messages</span><output id="messages">0</output></div>
+    <div class="metric"><span>Sent</span><output id="sent">0</output></div>
+    <div class="metric"><span>Received</span><output id="received">0</output></div>
+    <div class="metric"><span>Contacts</span><output id="contacts">0</output></div>
+    <div class="metric"><span>Elapsed</span><output id="elapsed">0.0s</output></div>
+  </div>
+  <ol id="results">
+    <li id="case-archive" data-state="pending">19,000-connection ZIP — pending</li>
+    <li id="case-mail100" data-state="pending">100-message native storage check — pending</li>
+    <li id="case-mail1000" data-state="pending">1,000-message native storage check — pending</li>
+    <li id="case-mail2g" data-state="pending">2 GiB Blob and real worker check — pending</li>
+  </ol>
+  <pre id="details">Click Run parser checks to begin.</pre>
+  <p class="note">Stop requests cooperative cancellation first, then terminates a nonresponsive worker. Cleanup removes only this run's test rows from local output storage. Keep the page open until cleanup finishes.</p>
+</main>
+<script type="module" src="./parser-checks.ts"></script>
+</body>
+</html>

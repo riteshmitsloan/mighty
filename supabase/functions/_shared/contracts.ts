@@ -1,10 +1,11 @@
+import type {ProviderDiagnostic} from './provider-diagnostics.ts';
 export type ToolInput={name:'people_search';query:string};
 export type GatewayInput={feature:string;system:string;user:string;maxTokens:number;tools:ToolInput[]};
 export type Config={feature:string;provider:'gemini'|'astra'|'google_search';model:string;tier:string;weight:number;cache_ttl_days:number;max_tokens:number;max_prompt_bytes:number;input_usd_per_million:number;cached_input_usd_per_million:number;cache_write_usd_per_million:number;output_usd_per_million:number;fixed_cost_usd:number;reasoning_token_allowance:number;rates_valid_until:string;enabled:boolean;revision:number};
 export type Usage={tokensIn:number;tokensOut:number;cachedTokensIn:number;cacheWriteTokensIn:number};
 export type ProviderResult={text:string;usage:Usage};
 export class GatewayError extends Error{constructor(public status:number,message:string,public code='request_error'){super(message);}}
-export class ProviderError extends Error{constructor(message:string,public noCharge=false){super(message);}}
+export class ProviderError extends Error{constructor(message:string,public noCharge=false,public diagnostic?:ProviderDiagnostic){super(message);}}
 export function parseBody(value:unknown):GatewayInput{
  if(!value||typeof value!=='object'||Array.isArray(value))throw new GatewayError(400,'Provide a JSON object.');
  const x=value as Record<string,unknown>;

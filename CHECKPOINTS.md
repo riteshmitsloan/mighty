@@ -21,17 +21,19 @@ Recommended positioning: Human Flourishing, with AI Apps as an alternative. The 
 - Live Supabase: anonymous relationship reads return an empty array; anonymous writes and publishable-key `ai_precheck` calls are refused with SQLSTATE 42501.
 - Live gateway: a valid anonymous request returns 401; an invalid body returns 400.
 - Live quota test: a transactional cap of three admitted three calls and refused the fourth. The test rolled back afterward.
-- Local tests: migrations 001–005 apply in PGlite; RLS, reservation caps, immutable facts, inbox retries, import retries, and atomic settings patches are covered. All 128 app tests and 29 extension tests pass.
+- Local tests: migrations 001–006 apply in PGlite; RLS, reservation caps, immutable facts, inbox retries, import retries, and atomic settings patches are covered. 172 app tests, 35 extension/parser/popup tests, and 12 UI regression checks pass.
 - The production build passes and packages the versioned extension ZIP for the app download.
-- Local archive/resume tests: generated 19,000-connection archive and a real generated PDF extract successfully. Node parser speed is not a browser performance claim.
+- Browser parser checks: a synthetic 19,000-connection ZIP parsed in 0.39 seconds; an exact 2 GiB synthetic mailbox scanned in 1.65 seconds using a Worker and native IndexedDB. This is a synthetic received-body-heavy fixture, not a measured memory ceiling or a guarantee for every real mailbox. All four browser fixture checks passed.
+- Browser UI: reviewed desktop and 390-pixel mobile layouts, goal persistence across navigation/reload, keyboard dialog dismissal, and local import entry.
+- Live temporary-account security: own-row roundtrip passed; cross-account writes were refused with 42501. The cross-account read used an empty random namespace, not a populated second account.
+- Gemini features were enabled with explicit approval. Real profile and routing calls were rejected upstream; the diagnostic routing call returned provider HTTP 404 NOT_FOUND. Reservations were released, and no confirmed model cost is claimed.
 
 ## Still to verify
 
 - A complete app journey in the browser and live extension behavior on LinkedIn.
-- Actual model credentials, an authenticated provisioned test session, and a real `profile_briefing` call with provider token counts and confirmed cost.
+- Resolve the provider model/access rejection and complete a real `profile_briefing` call with measured usage and confirmed cost. Remove the approved disposable test account after checking its reservations.
 - Existing Google search credentials, web search results, and observed latency.
-- Large-mailbox IndexedDB behavior in a real browser.
 - Full `supabase db reset`: the local database runtime is unavailable on this machine.
 - Checkpoint submissions. The GitHub destination is https://github.com/riteshmitsloan/mighty.
 
-The founder selected the top-level Mighty Today, List, Explore, Person, and You concepts as the visual reference. The warm backgrounds, indigo and coral palette, logo, and Schibsted Grotesk typography are approved for implementation; matching those designs remains pending.
+The founder selected the top-level Mighty Today, List, Explore, Person, and You concepts as the visual reference. The warm backgrounds, indigo and coral palette, logo, and Schibsted Grotesk typography are approved for implementation; the app and popup now use that direction. CONTENT-REVIEW.md records wording changes and deliberate cuts. Reference-design example people and counts are not product data.

@@ -1,10 +1,11 @@
 import { db, accountId, gatewayForAccount, saveSettings } from './platform';
-import { createSanitizedArchive, type ArchiveResult } from './archive';
+import { createSanitizedArchive, companyOverlapFor, type ArchiveResult } from './archive';
 import { cleanText, contentFingerprint } from './text';
 import { createKnowledgeSynthesizer, knowledgeForStrategyBrief, type KnowledgeState } from './knowledge';
 import type { ResumeExtraction } from './resume';
 import type { MailboxWorkerResult } from './mbox.worker';
 import type { Connection } from './discover';
+import { readConnectionsData, readRelationshipData, savePersonData, updateStageData, finishImportData } from './data-access';
 
 export interface Person { id:string;person:string;profile_url:string|null;stage:string;context:Record<string,unknown>;created_at:string; profile?:Record<string,unknown> }
 export interface Capture { id:string;relationship_id:string;kind:string;body:string;related_event_id:string|null;created_at:string }
@@ -27,21 +28,14 @@ export function keepLocal(key:string,patch:LocalSources){
  localChain=job;return job;
 }
 export function canonicalProfile(value:string){if(!value.trim())return null;let url:URL;try{url=new URL(/^https?:/i.test(value)?value:`https://${value}`);}catch{throw Error('Enter a LinkedIn profile, such as linkedin.com/in/your-name.');}if(!['www.linkedin.com','linkedin.com'].includes(url.hostname)||!/^\/in\/[^/?#]+\/?$/.test(url.pathname))throw Error('Use a LinkedIn profile link.');return `https://www.linkedin.com${url.pathname.replace(/\/$/,'')}/`;}
-export function archiveConnections(archive?:ArchiveResult):Connection[]{return archive?.connections.map(p=>({person:`${p.firstName} ${p.lastName}`.trim(),profile_url:p.url,company:p.company,position:p.position,connectedOn:p.connectedOn}))||[];}
-export async function allConnections(uid:string){const rows:Connection[]=[];for(let offset=0;;offset+=1000){const {data,error}=await db!.from('connections').select('id,person,profile_url,company,role,context').eq('user_id',uid).order('id').range(offset,offset+999);if(error)throw Error(error.message);rows.push(...data);if(data.length<1000)return rows;}}
-export async function readRelationships(uid:string){
- const [people,events,reads]=await Promise.all([db!.from('outreach_log').select('*').eq('user_id',uid).order('created_at',{ascending:false}),db!.from('outreach_events').select('*').eq('user_id',uid).order('created_at',{ascending:false}),db!.from('profile_reads').select('relationship_id,snapshot,observed_at,created_at').eq('user_id',uid).order('observed_at',{ascending:false}).order('created_at',{ascending:false})]);
- for(const result of [people,events,reads])if(result.error)throw Error(result.error.message);
- const latest=new Map<string,Record<string,unknown>>();for(const row of reads.data||[])if(!latest.has(row.relationship_id))latest.set(row.relationship_id,row.snapshot);
- return {people:(people.data||[]).map(p=>({...p,profile:latest.get(p.id)||(p.context.profileComplete?p.context.profile:undefined)})) as Person[],events:(events.data||[]) as Capture[]};
-}
-export async function savePerson(expectedUid:string|null,input:{person:string;url?:string|null;reason:string;company?:string;position?:string;source?:string}){
- const uid=await accountId(expectedUid);const profile_url=canonicalProfile(input.url||'');const person=cleanText(input.person).trim();if(!person||person.length>200)throw Error('Enter a name under 200 characters.');
- if(profile_url){const existing=await db!.from('outreach_log').select('id').eq('user_id',uid).eq('profile_url',profile_url).maybeSingle();if(existing.error)throw Error(existing.error.message);if(existing.data)return existing.data.id;}
- const {data,error}=await db!.from('outreach_log').insert({user_id:uid,person,profile_url,context:{saveReason:cleanText(input.reason),source:input.source||'manual',company:input.company||'',position:input.position||'',profileComplete:false}}).select('id').single();if(error)throw Error(error.message);return data.id;
+export function archiveConnections(archive?:ArchiveResult):Connection[]{return archive?.connections.map(p=>({person:`${p.firstName} ${p.lastName}`.trim(),profile_url:p.url,company:p.company,position:p.position,connectedOn:p.connectedOn,companyOverlap:companyOverlapFor(archive.companyIndex,p.company)}))||[];}
+export async function allConnections(uid:string){await accountId(uid);const rows=await readConnectionsData(db!,uid);await accountId(uid);return rows;}
+export async function readRelationships(uid:string){await accountId(uid);const result=await readRelationshipData(db!,uid);await accountId(uid);return result;}
+export async function savePerson(expectedUid:string|null,input:import('./data-access').PersonInput){
+ const uid=await accountId(expectedUid);const profileUrl=canonicalProfile(input.url||'');return savePersonData(db!,uid,input,profileUrl);
 }
 export async function capture(expectedUid:string|null,personId:string,kind:string,body='',relatedId?:string){const uid=await accountId(expectedUid);const {error}=await db!.from('outreach_events').insert({user_id:uid,relationship_id:personId,kind,body:cleanText(body),related_event_id:relatedId||null});if(error)throw Error(error.message);}
-export async function changeStage(expectedUid:string|null,personId:string,stage:string){const uid=await accountId(expectedUid);const {error}=await db!.from('outreach_log').update({stage}).eq('user_id',uid).eq('id',personId);if(error)throw Error(error.message);}
+export async function changeStage(expectedUid:string|null,personId:string,stage:string){const uid=await accountId(expectedUid);await updateStageData(db!,uid,personId,stage);}
 
 async function saveSource(uid:string,source:string,fingerprint:string,facts:unknown){const {error}=await db!.from('knowledge_sources').upsert({user_id:uid,source,fingerprint,facts},{onConflict:'user_id,source,fingerprint',ignoreDuplicates:true});if(error)throw Error(error.message);}
 export async function saveResume(expectedUid:string|null,resume:ResumeExtraction){const uid=await accountId(expectedUid);await saveSource(uid,'resume',resume.fingerprint,{text:cleanText(resume.text),pages:resume.pages});}
@@ -57,7 +51,7 @@ export async function saveArchive(expectedUid:string|null,archive:ArchiveResult,
  }
  await saveSource(uid,'archive',archive.fingerprint,{layer1:archive.layer1,counts:archive.counts,writingSamples:archive.writingSamples,companyIndex:archive.companyIndex});
  const bundle=await createSanitizedArchive(archive);const upload=await db!.storage.from('archives').upload(path,bundle,{contentType:'application/zip',upsert:true});if(upload.error)throw Error(upload.error.message);
- const finish=await db!.from('imports').update({status:'completed',record_count:archive.connections.length}).eq('user_id',uid).eq('id',id);if(finish.error)throw Error(finish.error.message);
+ await accountId(uid);await finishImportData(db!,uid,id,archive.connections.length);
 }
 export async function savedArchiveBlob(expectedUid:string|null){const uid=await accountId(expectedUid);const {data,error}=await db!.from('imports').select('storage_path').eq('user_id',uid).eq('kind','linkedin_archive').eq('status','completed').order('created_at',{ascending:false}).limit(1).maybeSingle();if(error)throw Error(error.message);if(!data?.storage_path)throw Error('No saved archive is available yet.');const result=await db!.storage.from('archives').download(data.storage_path);if(result.error)throw Error(result.error.message);return result.data;}
 export function synthesizer(key:string){return createKnowledgeSynthesizer({gateway:gatewayForAccount(key),read:async()=>((await localSources(key)).knowledge||null),persist:async knowledge=>{await saveSettings({knowledge},key);await keepLocal(key,{knowledge});return {error:null};}});}
