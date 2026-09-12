@@ -6,27 +6,12 @@ import type { ResumeExtraction } from './resume';
 import type { MailboxWorkerResult } from './mbox.worker';
 import type { Connection } from './discover';
 import { readConnectionsData, readRelationshipData, savePersonData, updateStageData, finishImportData } from './data-access';
+import { localSources, keepLocal } from './local-sources';
+export { localSources, keepLocal } from './local-sources';
 
 export interface Person { id:string;person:string;profile_url:string|null;stage:string;context:Record<string,unknown>;created_at:string; profile?:Record<string,unknown> }
 export interface Capture { id:string;relationship_id:string;kind:string;body:string;related_event_id:string|null;created_at:string }
 export interface LocalSources { archive?:ArchiveResult;resume?:ResumeExtraction;mailbox?:MailboxWorkerResult;strategy?:string;knowledge?:KnowledgeState }
-const openLocal=()=>new Promise<IDBDatabase>((resolve,reject)=>{const request=indexedDB.open('mighty-local-sources',1);request.onupgradeneeded=()=>request.result.createObjectStore('sources');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
-export async function localSources(key:string):Promise<LocalSources>{const store=await openLocal();try{return await new Promise((resolve,reject)=>{const request=store.transaction('sources').objectStore('sources').get(key);request.onsuccess=()=>resolve(request.result||{});request.onerror=()=>reject(request.error);});}finally{store.close();}}
-let localChain:Promise<unknown>=Promise.resolve();
-export function keepLocal(key:string,patch:LocalSources){
- const snapshot=structuredClone(patch);
- const job=localChain.catch(()=>{}).then(async()=>{
-  const store=await openLocal();
-  try{await new Promise<void>((resolve,reject)=>{
-   // One read/write transaction serializes merges across browser tabs too.
-   const tx=store.transaction('sources','readwrite');const sources=tx.objectStore('sources');
-   tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
-   const read=sources.get(key);
-   read.onsuccess=()=>{try{sources.put({...read.result,...snapshot},key);}catch(error){tx.abort();reject(error);}};
-  });}finally{store.close();}
- });
- localChain=job;return job;
-}
 export function canonicalProfile(value:string){if(!value.trim())return null;let url:URL;try{url=new URL(/^https?:/i.test(value)?value:`https://${value}`);}catch{throw Error('Enter a LinkedIn profile, such as linkedin.com/in/your-name.');}if(!['www.linkedin.com','linkedin.com'].includes(url.hostname)||!/^\/in\/[^/?#]+\/?$/.test(url.pathname))throw Error('Use a LinkedIn profile link.');return `https://www.linkedin.com${url.pathname.replace(/\/$/,'')}/`;}
 export function archiveConnections(archive?:ArchiveResult):Connection[]{return archive?.connections.map(p=>({person:`${p.firstName} ${p.lastName}`.trim(),profile_url:p.url,company:p.company,position:p.position,connectedOn:p.connectedOn,companyOverlap:companyOverlapFor(archive.companyIndex,p.company)}))||[];}
 export async function allConnections(uid:string){await accountId(uid);const rows=await readConnectionsData(db!,uid);await accountId(uid);return rows;}

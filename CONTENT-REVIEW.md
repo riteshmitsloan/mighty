@@ -9,6 +9,7 @@ The content needed fewer explanations and more precise actions. The implementati
 - Use **Record an update** for notes, replies, conversations, and promises. “Capture a note” understated what that action does.
 - Explain source storage once in an expandable disclosure. Distinguish local parsing from saving processed data to an account. State that received message bodies are excluded and the raw mailbox never uploads.
 - Label public search results **No score yet**. Keep a brief explanation of why a real profile read is needed. Remove repeated warnings, the repeated question above an answer, and a misleading claim that every matched archive record reached the model.
+- State archive dates as **Connected on LinkedIn in [year]**. This identifies the source of the date without a repeated disclaimer or implying a recent conversation.
 - Keep the search headline and snippet after a person is saved, clearly labeled as unverified search context. They never count as a completed profile read.
 - Remove duplicate navigation, headings, marketing lines, and descriptions of internal queues or profile anchors. Keep status and error messages that help someone recover.
 - Keep actual imported facts and actual relationship history. Reference-design names, activity, counts, and scores are not seeded into the app.

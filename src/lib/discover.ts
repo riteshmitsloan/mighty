@@ -19,7 +19,7 @@ export function ownNetwork(query:string,all:Connection[],strategy='',employers:s
   const overlap=verifiedCompanyOverlap(person.company,companyIndex?companyOverlapFor(companyIndex,person.company||''):person.companyOverlap);
   const connected=person.connectedOn||String(person.context?.connectedOn||'');const timestamp=Date.parse(connected);const age=Number.isFinite(timestamp)&&timestamp<=now?Math.floor((now-timestamp)/86400000):null;
   const goalTerms=[...goals].filter(t=>tokens.has(t));const parts=[`“${matched.join('”, “')}” matches ${position||'their recorded company'}${position&&person.company?` at ${person.company}`:''}.`];
-  if(goalTerms.length)parts.push(`Your goal also mentions ${goalTerms.join(', ')}.`);if(employer)parts.push(`You have both worked at ${employer}.`);if(age!==null&&age>=365)parts.push(`Connected ${new Date(timestamp).getUTCFullYear()}; this is connection age, not the last conversation.`);
+  if(goalTerms.length)parts.push(`Your goal also mentions ${goalTerms.join(', ')}.`);if(employer)parts.push(`You have both worked at ${employer}.`);if(age!==null&&age>=365)parts.push(`Connected on LinkedIn in ${new Date(timestamp).getUTCFullYear()}.`);
   if(overlap)parts.push(overlap.statement+'.');
   return [{person,companyOverlap:overlap,reason:parts.join(' '),matchedTerms:matched,sharedEmployer:employer,connectionAgeDays:age,order:matched.length*100+goalTerms.length*10+(employer?5:0)+(age!==null&&age>365?1:0)}];
  }).sort((a,b)=>b.order-a.order||a.person.person.localeCompare(b.person.person)).map(({order,...m})=>m);

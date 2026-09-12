@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mighty local goal storage checks</title>
+  <style>
+    body {font:16px/1.6 system-ui,sans-serif;max-width:880px;margin:40px auto;padding:0 20px;color:#172822;background:#f7faf8}
+    h1 {line-height:1.2} button {font:inherit;padding:10px 16px;border:0;border-radius:8px;background:#176b47;color:white;cursor:pointer}
+    button:disabled {opacity:.5;cursor:wait} li {padding:6px 0} [data-state="passed"] {color:#176b47} [data-state="failed"] {color:#a12222}
+    #status {font-weight:700} pre {white-space:pre-wrap;padding:16px;background:white;border:1px solid #dde6df;border-radius:10px}
+  </style>
+</head>
+<body>
+  <h1>Local goal storage checks</h1>
+  <p>Eight native IndexedDB checks verify that goal edits avoid large source records, preserve legacy imports, and keep combined writes atomic.</p>
+  <p>All records are synthetic. Each run uses a new, uniquely named test database and account keys, then deletes that database. No user records, account services, or files are read. No authentication is performed.</p>
+  <button id="run" type="button">Run storage checks</button>
+  <p id="status" role="status" aria-live="polite" data-state="ready">Ready.</p>
+  <ol id="results"></ol>
+  <pre id="details">Keep this page open until cleanup finishes.</pre>
+  <script type="module" src="./goal-storage-checks.ts"></script>
+</body>
+</html>
