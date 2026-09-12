@@ -1,0 +1,1 @@
+Font integration placeholder only. Root may supply the existing licensed app font as assets/mighty-ui.woff2, then add an @font-face rule to popup.css. The prototype currently uses system fonts. No nonexistent icon or font is referenced by the manifest.

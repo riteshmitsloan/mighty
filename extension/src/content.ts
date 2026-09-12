@@ -1,0 +1,11 @@
+import{snapshot}from'./profile.js';
+type Mount={dispose:()=>void};
+const scope=globalThis as typeof globalThis&{__mightyResearch?:Mount};
+scope.__mightyResearch?.dispose();
+const listener=(message:any,sender:chrome.runtime.MessageSender,respond:(r:unknown)=>void)=>{if(sender.id!==chrome.runtime.id||message?.type!=='mighty:read')return;respond(snapshot(document,location.href));};
+chrome.runtime.onMessage.addListener(listener);
+let timer:ReturnType<typeof setTimeout>|undefined;
+const changed=()=>{clearTimeout(timer);timer=setTimeout(()=>{try{void chrome.runtime.sendMessage({type:'mighty:page_changed'}).catch(()=>{});}catch{observer.disconnect();}},100);};
+const observer=new MutationObserver(changed);observer.observe(document.documentElement,{childList:true,subtree:true,characterData:true});
+addEventListener('popstate',changed);
+scope.__mightyResearch={dispose(){chrome.runtime.onMessage.removeListener(listener);observer.disconnect();clearTimeout(timer);removeEventListener('popstate',changed);}};

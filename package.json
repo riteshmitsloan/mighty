@@ -1,1 +1,40 @@
-{"name":"mighty","private":true,"version":"0.1.0","type":"module","scripts":{"dev":"vite --host 127.0.0.1","build":"tsc -b && vite build","build:extension":"node scripts/build-extension.mjs","test":"tsx --test tests/*.test.ts","install:ci":"npm ci"},"dependencies":{"@supabase/supabase-js":"^2.57.4","@zip.js/zip.js":"^2.14.1","lucide-react":"^0.468.0","pdfjs-dist":"^6.3.289","react":"^18.3.1","react-dom":"^18.3.1"},"devDependencies":{"@electric-sql/pglite":"^0.5.8","@types/chrome":"^0.0.287","@types/node":"^22.10.0","@types/react":"^18.3.12","@types/react-dom":"^18.3.1","@vitejs/plugin-react":"^4.3.4","autoprefixer":"^10.4.20","esbuild":"^0.24.2","linkedom":"^0.18.13","postcss":"^8.4.49","supabase":"^2.117.0","tailwindcss":"^3.4.17","tsx":"^4.19.2","typescript":"~5.6.3","vite":"^6.0.7"}}
+{
+  "name": "mighty",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "bash tools/build-zip.sh && tsc -b && vite build",
+    "build:extension": "node scripts/build-extension.mjs",
+    "test": "tsx --test tests/*.test.ts",
+    "install:ci": "npm ci",
+    "test:extension": "cd extension && node scripts/check.mjs && node scripts/test.mjs"
+  },
+  "dependencies": {
+    "@fontsource-variable/dm-sans": "^5.3.0",
+    "@supabase/supabase-js": "^2.57.4",
+    "@zip.js/zip.js": "^2.14.1",
+    "lucide-react": "^0.468.0",
+    "pdfjs-dist": "^6.3.289",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
+    "@types/chrome": "^0.0.287",
+    "@types/node": "^22.10.0",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "autoprefixer": "^10.4.20",
+    "esbuild": "^0.28.2",
+    "linkedom": "^0.18.13",
+    "postcss": "^8.4.49",
+    "supabase": "^2.117.0",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
+    "typescript": "~5.6.3",
+    "vite": "^6.0.7"
+  }
+}

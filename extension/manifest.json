@@ -1,0 +1,56 @@
+{
+  "manifest_version": 3,
+  "name": "Mighty",
+  "version": "0.2.0",
+  "description": "Mighty. Intentional, intelligent networking.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://www.linkedin.com/*",
+    "https://linkedin.com/*"
+  ],
+  "background": {
+    "service_worker": "worker.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Mighty"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.linkedin.com/in/*",
+        "https://www.linkedin.com/search/results/people/*",
+        "https://linkedin.com/in/*",
+        "https://linkedin.com/search/results/people/*"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "externally_connectable": {
+    "matches": [
+      "http://127.0.0.1/*",
+      "http://localhost/*"
+    ]
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; connect-src 'self';"
+  },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "assets/mighty-ui.woff2"
+      ],
+      "matches": [
+        "https://www.linkedin.com/*",
+        "https://linkedin.com/*"
+      ]
+    }
+  ]
+}

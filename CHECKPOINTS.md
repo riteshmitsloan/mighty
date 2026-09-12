@@ -21,7 +21,8 @@ Recommended positioning: Human Flourishing, with AI Apps as an alternative. The 
 - Live Supabase: anonymous relationship reads return an empty array; anonymous writes and publishable-key `ai_precheck` calls are refused with SQLSTATE 42501.
 - Live gateway: a valid anonymous request returns 401; an invalid body returns 400.
 - Live quota test: a transactional cap of three admitted three calls and refused the fourth. The test rolled back afterward.
-- Local tests: migrations 001–004 apply in PGlite; RLS, reservation caps, immutable facts, inbox retries, and import retries are covered.
+- Local tests: migrations 001–005 apply in PGlite; RLS, reservation caps, immutable facts, inbox retries, import retries, and atomic settings patches are covered. All 128 app tests and 29 extension tests pass.
+- The production build passes and packages the versioned extension ZIP for the app download.
 - Local archive/resume tests: generated 19,000-connection archive and a real generated PDF extract successfully. Node parser speed is not a browser performance claim.
 
 ## Still to verify
@@ -31,6 +32,6 @@ Recommended positioning: Human Flourishing, with AI Apps as an alternative. The 
 - Existing Google search credentials, web search results, and observed latency.
 - Large-mailbox IndexedDB behavior in a real browser.
 - Full `supabase db reset`: the local database runtime is unavailable on this machine.
-- GitHub destination and checkpoint submissions.
+- Checkpoint submissions. The GitHub destination is https://github.com/riteshmitsloan/mighty.
 
-Brand, logo, and typography work begins after the functional build is ready for review.
+The founder selected the top-level Mighty Today, List, Explore, Person, and You concepts as the visual reference. The warm backgrounds, indigo and coral palette, logo, and Schibsted Grotesk typography are approved for implementation; matching those designs remains pending.

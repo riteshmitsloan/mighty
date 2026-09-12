@@ -4,7 +4,7 @@ const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222
 test('all migrations apply and database security/budgets enforce the brief',async t=>{
  const db=new PGlite();
  await db.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema auth;create table auth.users(id uuid primary key);create function auth.uid() returns uuid language sql stable as $$select nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;grant usage on schema auth,public to anon,authenticated,service_role;grant execute on function auth.uid() to anon,authenticated,service_role;create schema storage;create table storage.buckets(id text primary key,name text,public boolean,file_size_limit bigint,allowed_mime_types text[]);create table storage.objects(id uuid default gen_random_uuid(),bucket_id text,name text);alter table storage.objects enable row level security;create function storage.foldername(text) returns text[] language sql as $$select string_to_array($1,'/')$$;grant usage on schema storage to authenticated;grant all on storage.objects to authenticated;`);
- for(const name of ['001_schema.sql','002_ai.sql','003_quota.sql','004_modules.sql'])await db.exec(await readFile(MIGRATIONS_ROOT+'/'+name,'utf8'));
+ for(const name of ['001_schema.sql','002_ai.sql','003_quota.sql','004_modules.sql','005_settings.sql'])await db.exec(await readFile(MIGRATIONS_ROOT+'/'+name,'utf8'));
  await db.exec(`insert into auth.users values('${A}'),('${B}');insert into public.users(user_id) values('${A}'),('${B}');insert into public.settings(user_id) values('${A}'),('${B}');insert into public.ai_user_limits(user_id) values('${A}'),('${B}');insert into public.outreach_log(id,user_id,person) values('${P}','${B}','Isolated test record');update public.ai_config set enabled=true;`);
  await t.test('every table has RLS; anonymous reads empty and writes return 42501',async()=>{const r=await db.query<any>(`select relname from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relkind='r' and not c.relrowsecurity;`);assert.equal(r.rows.length,0);await db.exec('set role anon');assert.equal((await db.query('select * from public.outreach_log')).rows.length,0);await assert.rejects(db.query(`insert into public.outreach_log(user_id,person) values('${A}','refused')`),(e:any)=>e.code==='42501');await db.exec('reset role');});
  await t.test('cross-account reads/writes/references and entitlement changes fail',async()=>{await db.exec(`set role authenticated;set request.jwt.claim.sub='${A}';`);assert.equal((await db.query('select * from public.outreach_log')).rows.length,0);await assert.rejects(db.query(`insert into public.outreach_log(user_id,person) values('${B}','refused')`),(e:any)=>e.code==='42501');await assert.rejects(db.query(`insert into public.outreach_events(user_id,relationship_id,kind,body) values('${A}','${P}','note','refused')`),(e:any)=>e.code==='23503');await assert.rejects(db.query(`update public.users set account_status='active'`),(e:any)=>e.code==='42501');await assert.rejects(db.query(`update public.settings set plan_caps='{"unlimited":true}'`),(e:any)=>e.code==='42501');await db.exec('reset role');});
@@ -18,6 +18,7 @@ test('all migrations apply and database security/budgets enforce the brief',asyn
  await t.test('lapsed accounts keep records and cannot mutate them',async()=>{await db.exec(`update public.users set account_status='lapsed' where user_id='${B}';set role authenticated;set request.jwt.claim.sub='${B}';`);assert.equal((await db.query('select * from public.outreach_log')).rows.length,1);await assert.rejects(db.query(`insert into public.outreach_events(user_id,relationship_id,kind,body) values('${B}','${P}','note','refused')`),(e:any)=>e.code==='42501');await db.exec('reset role');});
 
  await moduleAssertions(db,t);
+ await settingsAssertions(db,t);
  await db.close();
 });
 
@@ -214,5 +215,99 @@ async function moduleAssertions(db: PGlite, t: import('node:test').TestContext) 
    await assert.rejects(db.query(`insert into public.imports(user_id,kind) values($1,'linkedin_archive')`,[A]),refused42501);
   });
   await db.query(`update public.users set account_status='active' where user_id=$1`,[A]);
+ });
+}
+
+async function settingsAssertions(db:PGlite,t:import('node:test').TestContext){
+ const C='44444444-4444-4444-8444-444444444444';
+ const refused42501=(e:any)=>e.code==='42501';
+ const asUser=async<T>(userId:string,operation:()=>Promise<T>):Promise<T>=>{
+  await db.exec(`set role authenticated;set request.jwt.claim.sub='${userId}';`);
+  try{return await operation();}finally{await db.exec('reset role;reset request.jwt.claim.sub;');}
+ };
+ const patch=async(userId:string,value:unknown)=>(await db.query<any>('select public.patch_settings($1,$2::jsonb) as data',[userId,JSON.stringify(value)])).rows[0].data;
+ const read=async(userId:string)=>(await db.query<any>('select data from public.settings where user_id=$1',[userId])).rows[0]?.data;
+ const assets=[{name:'resume.pdf',path:`${A}/resume.pdf`,parsed:true},{name:'archive.zip',path:`${A}/archive.zip`,parsed:true}];
+ const knowledge={fingerprint:'a'.repeat(64),source:'original',proofPoints:['Led 15 engineers']};
+ const initial={strategy:'Original goal',knowledge,assets,voice:{samples:['My own writing.']}};
+ await db.query('update public.settings set data=$2::jsonb where user_id=$1',[A,JSON.stringify(initial)]);
+ await t.test('005 preserves schema grants and makes people search free without changing its project quota',async()=>{
+  const grants=(await db.query<any>(`select has_function_privilege('anon','public.patch_settings(uuid,jsonb)','execute') as anon,has_function_privilege('authenticated','public.patch_settings(uuid,jsonb)','execute') as authenticated,has_function_privilege('service_role','public.patch_settings(uuid,jsonb)','execute') as service`)).rows[0];
+  assert.deepEqual(grants,{anon:false,authenticated:true,service:true});
+  assert.equal((await db.query<any>(`select weight from public.ai_config where feature='people_search'`)).rows[0].weight,0);
+  assert.equal((await db.query<any>('select daily_cap from public.people_search_config')).rows[0].daily_cap,3);
+ });
+ await t.test('strategy-only patch atomically preserves existing knowledge, assets and voice',async()=>{
+  await asUser(A,async()=>{
+   const result=await patch(A,{strategy:'Meet product leaders in Boston'});
+   assert.deepEqual(result,{...initial,strategy:'Meet product leaders in Boston'});
+   assert.deepEqual(await read(A),result);
+  });
+ });
+ await t.test('knowledge-only and repeated patches preserve the current strategy and all uploaded asset references',async()=>{
+  await asUser(A,async()=>{
+   const nextKnowledge={fingerprint:'b'.repeat(64),proofPoints:['Led 15 engineers','Shipped 8 products']};
+   const one=await patch(A,{knowledge:nextKnowledge});
+   assert.equal(one.strategy,'Meet product leaders in Boston');assert.deepEqual(one.assets,assets);assert.deepEqual(one.voice,initial.voice);assert.deepEqual(one.knowledge,nextKnowledge);
+   const two=await patch(A,{knowledge:nextKnowledge});assert.deepEqual(two,one);assert.deepEqual(await read(A),one);
+   assert.deepEqual(await patch(A,{}),one);
+   assert.equal((await db.query('select user_id from public.settings where user_id=$1',[A])).rows.length,1);
+  });
+ });
+ await t.test('separate goal and asset patches accumulate without replacing unrelated top-level fields',async()=>{
+  await asUser(A,async()=>{
+   const before=await read(A);const newAssets=[...assets,{name:'new-resume.pdf',path:`${A}/new-resume.pdf`,parsed:true}];
+   await patch(A,{strategy:'Explore healthcare partnerships'});const after=await patch(A,{assets:newAssets});
+   assert.equal(after.strategy,'Explore healthcare partnerships');assert.deepEqual(after.assets,newAssets);assert.deepEqual(after.knowledge,before.knowledge);assert.deepEqual(after.voice,before.voice);
+  });
+ });
+ await t.test('first settings patch creates one row for a provisioned user without existing settings',async()=>{
+  assert.equal(await read(C),undefined);
+  await asUser(C,async()=>{
+   assert.deepEqual(await patch(C,{strategy:'My first goal'}),{strategy:'My first goal'});
+   assert.deepEqual(await patch(C,{assets:[]}),{strategy:'My first goal',assets:[]});
+   assert.deepEqual(await patch(C,{knowledge:{rawFacts:['Original fact']}}),{strategy:'My first goal',assets:[],knowledge:{rawFacts:['Original fact']}});
+   assert.equal((await db.query('select user_id from public.settings where user_id=$1',[C])).rows.length,1);
+  });
+ });
+ await t.test('unknown keys, non-object patches and merged data over the byte limit refuse without altering saved settings',async()=>{
+  await asUser(A,async()=>{
+   const before=await read(A);
+   for(const value of[null,[],['strategy'],'text',5,true])await assert.rejects(patch(A,value),(e:any)=>e.code==='22023');
+   await assert.rejects(db.query('select public.patch_settings($1,null)',[A]),(e:any)=>e.code==='22023');
+   for(const key of['plan_caps','user_id','account_status','unrecognized'])await assert.rejects(patch(A,{[key]:'refused'}),(e:any)=>e.code==='23514');
+   await assert.rejects(patch(A,{knowledge:{large:'医'.repeat(50_000)}}),(e:any)=>e.code==='23514');
+   assert.deepEqual(await read(A),before);
+  });
+ });
+ await t.test('cross-user and absent-session settings patches fail with 42501 before any row changes',async()=>{
+  const beforeA=await read(A),beforeB=await read(B);
+  await asUser(A,async()=>{
+   await assert.rejects(patch(B,{strategy:'Wrong account'}),refused42501);
+   await assert.rejects(db.query('select public.patch_settings(null,$1::jsonb)',[JSON.stringify({strategy:'No owner'})]),refused42501);
+   await assert.rejects(db.query('select public.patch_settings($1,$2::jsonb)',[B,JSON.stringify(['bad patch'])]),refused42501);
+  });
+  await db.exec('set role authenticated;reset request.jwt.claim.sub;');
+  try{await assert.rejects(patch(A,{strategy:'No session'}),refused42501);}finally{await db.exec('reset role;');}
+  assert.deepEqual(await read(A),beforeA);assert.deepEqual(await read(B),beforeB);
+ });
+ await t.test('anonymous callers cannot patch settings even with a forged local claim',async()=>{
+  const before=await read(A);await db.exec(`set role anon;set request.jwt.claim.sub='${A}';`);
+  try{await assert.rejects(patch(A,{strategy:'Anonymous overwrite'}),refused42501);}finally{await db.exec('reset role;reset request.jwt.claim.sub;');}
+  assert.deepEqual(await read(A),before);
+ });
+ await t.test('lapsed account patches are refused with 42501 and existing goals, knowledge and files remain readable',async()=>{
+  const before=await read(A);await db.query(`update public.users set account_status='lapsed' where user_id=$1`,[A]);
+  try{
+   await asUser(A,async()=>{await assert.rejects(patch(A,{strategy:'Overwrite after lapse'}),refused42501);assert.deepEqual(await read(A),before);});
+  }finally{await db.query(`update public.users set account_status='active' where user_id=$1`,[A]);}
+ });
+ await t.test('immutable history tables refuse TRUNCATE for owner and service role and retain all rows',async()=>{
+  for(const table of['outreach_events','knowledge_sources','profile_reads']){
+   const before=Number((await db.query<any>(`select count(*) as count from public.${table}`)).rows[0].count);assert.ok(before>0);
+   await assert.rejects(db.exec(`truncate table public.${table}`),refused42501);
+   await db.exec('set role service_role;');try{await assert.rejects(db.exec(`truncate table public.${table}`),refused42501);}finally{await db.exec('reset role;');}
+   assert.equal(Number((await db.query<any>(`select count(*) as count from public.${table}`)).rows[0].count),before);
+  }
  });
 }

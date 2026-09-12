@@ -12,3 +12,5 @@ outputs/
 
 *.tsbuildinfo
 extension/node_modules/
+
+public/downloads/*.zip

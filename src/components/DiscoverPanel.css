@@ -1,0 +1,47 @@
+.discover-panel { display: grid; gap: 22px; min-width: 0; }
+.discover-panel .discover-search, .discover-panel .discover-answer { padding: 26px; }
+.discover-panel .discover-muted { color: var(--muted, #6b766f); line-height: 1.7; margin: 8px 0 0; }
+.discover-panel .discover-small { font-size: 12px; }
+.discover-panel form { margin-top: 24px; }
+.discover-panel label { display: block; font-size: 13px; font-weight: 600; margin-bottom: 9px; }
+.discover-panel .discover-input-row { display: flex; align-items: stretch; gap: 10px; }
+.discover-panel .discover-input-row input { min-width: 0; flex: 1; }
+.discover-panel .discover-web-action { display: flex; align-items: center; justify-content: space-between; gap: 18px; border-top: 1px solid var(--line, #e3e7e1); margin-top: 24px; padding-top: 21px; }
+.discover-panel .discover-web-action strong { font-size: 13px; font-weight: 600; }
+.discover-panel .discover-info { padding: 13px 15px; background: #f1f5e9; border-radius: 8px; line-height: 1.6; font-size: 13px; margin: 18px 0 0; }
+.discover-panel .discover-error { color: #8b3c2f; background: #fcf2ef; border-radius: 7px; padding: 10px 12px; line-height: 1.6; font-size: 12px; overflow-wrap: anywhere; }
+.discover-panel .discover-answer-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; font-size: 14px; margin: 20px 0; }
+.discover-panel .discover-section-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; padding: 24px 26px; border-bottom: 1px solid var(--line, #e3e7e1); }
+.discover-panel .discover-section-heading h2 { font-size: 18px; }
+.discover-panel .discover-empty { color: var(--muted, #6b766f); line-height: 1.8; font-size: 14px; padding: 18px 26px 26px; margin: 0; }
+.discover-panel .discover-list { list-style: none; padding: 0; margin: 0; }
+.discover-panel .discover-person { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 23px 26px; border-bottom: 1px solid #edf0e9; }
+.discover-panel .discover-person:last-child { border-bottom: 0; }
+.discover-panel .discover-person-main { min-width: 0; flex: 1; }
+.discover-panel .discover-person h3 { font-size: 16px; line-height: 1.5; overflow-wrap: anywhere; }
+.discover-panel .discover-person a { text-decoration: underline; text-decoration-color: #aabca9; text-underline-offset: 4px; }
+.discover-panel .discover-person .discover-muted { font-size: 13px; margin-top: 4px; }
+.discover-panel .discover-reason { font-size: 13px; line-height: 1.75; margin: 13px 0 11px; color: #3c5545; }
+.discover-panel .discover-snippet { font-size: 13px; line-height: 1.75; margin: 13px 0; color: #59685d; overflow-wrap: anywhere; }
+.discover-panel .discover-save { width: 118px; flex-shrink: 0; text-align: right; }
+.discover-panel .discover-save .button { min-width: 92px; }
+.discover-panel .discover-save .discover-error { text-align: left; }
+.discover-panel .discover-brief-help { margin-top: 13px; color: #5b6e5c; font-size: 12px; }
+.discover-panel .discover-brief-help summary { cursor: pointer; font-weight: 600; text-underline-offset: 3px; }
+.discover-panel .discover-brief-help summary:focus-visible { outline: 3px solid #90b638; outline-offset: 4px; }
+.discover-panel .discover-brief-help p { line-height: 1.8; max-width: 620px; margin-bottom: 0; }
+.discover-panel .discover-pagination, .discover-panel .discover-more { padding: 18px 26px; border-top: 1px solid var(--line, #e3e7e1); display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.discover-panel .discover-pagination > div { display: flex; flex-wrap: wrap; gap: 8px; }
+.discover-panel .discover-pagination p, .discover-panel .discover-more p { margin: 0; }
+.discover-panel .discover-more { background: #fafbf8; justify-content: flex-start; }
+.discover-panel .discover-save-notice { font-size: 13px; line-height: 1.6; color: #3f6042; margin: -6px 0 0; min-height: 20px; }
+@media (max-width: 700px) {
+  .discover-panel .discover-search, .discover-panel .discover-answer { padding: 20px; }
+  .discover-panel .discover-input-row, .discover-panel .discover-web-action { flex-direction: column; align-items: stretch; }
+  .discover-panel .discover-section-heading, .discover-panel .discover-person { padding: 20px; }
+  .discover-panel .discover-section-heading { flex-wrap: wrap; }
+  .discover-panel .discover-person { gap: 12px; }
+  .discover-panel .discover-save { width: 88px; }
+  .discover-panel .discover-save .button { min-width: 82px; padding: 10px 13px; }
+  .discover-panel .discover-pagination, .discover-panel .discover-more { padding: 17px 20px; flex-wrap: wrap; }
+}
