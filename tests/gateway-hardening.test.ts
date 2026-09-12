@@ -28,6 +28,7 @@ interface HarnessOptions {
   confirmation?: 'false' | 'error';
   dispatchError?: boolean;
   diagnostic?: (event: unknown) => void;
+  disableDiagnostics?: boolean;
   reserveError?: boolean;
   cachedText?: string;
   fetcher?: (url: URL, init: RequestInit | undefined, logs: Map<string, Log>) => Promise<Response>;
@@ -111,7 +112,7 @@ function harness(options: HarnessOptions = {}) {
     },
   };
   const handler = createGateway({
-    diagnostic: event => { diagnostics.push(event); options.diagnostic?.(event); },
+    diagnostic: options.disableDiagnostics ? undefined : event => { diagnostics.push(event); options.diagnostic?.(event); },
     env: key => { envReads.push(key); return environment[key]; },
     client: () => { clients++; return db; },
     fetcher: (async (url: RequestInfo | URL, init?: RequestInit) => {
@@ -330,4 +331,25 @@ test('diagnostic logging failure cannot change release or unknown-outcome reserv
     assert.equal(h.pending().length, status === 403 ? 0 : 1);
     assert.equal(h.rpcs.filter(call => call.name === 'ai_release_call').length, status === 403 ? 1 : 0);
   }
+});
+
+
+test('Gemini404 triggers exactly one metadata GET only with diagnostics enabled, without retrying generation',async()=>{
+ for(const enabled of [true,false]){
+  const h=harness({disableDiagnostics:!enabled,fetcher:async(url,init)=>url.pathname==='/v1beta/models'?Response.json({models:[{name:'models/gemini-2.5-flash',supportedGenerationMethods:['countTokens']},{name:'models/gemini-3.1-flash-lite',supportedGenerationMethods:['generateContent'],description:'PRIVATE_CATALOG_MARKER'}],nextPageToken:'PRIVATE_PAGE_TOKEN'}):Response.json({error:{status:'NOT_FOUND'}},{status:404})});
+  const response=await h.send('profile_briefing','Synthetic input.');assert.equal(response.status,502);assert.equal(h.pending().length,0);
+  assert.equal(h.fetches.filter(x=>x.init?.method==='POST').length,1);assert.equal(h.fetches.length,enabled?2:1);
+  if(enabled){const probe=h.fetches[1];assert.equal(probe.init?.method,'GET');assert.equal(probe.init?.body,undefined);assert.equal(probe.url.search,'?pageSize=1000');assert.equal(new Headers(probe.init?.headers).get('x-goog-api-key'),'fake-canonical-gemini');const event=h.diagnostics[1] as any;assert.equal(event.event,'ai_provider_models');assert.equal(event.listSucceeded,true);assert.equal(event.listComplete,false);assert.equal(event.flash25,false);assert.equal(event.flashLite31,true);for(const [name,value]of Object.entries(event))if(!['event','requestId'].includes(name))assert.equal(typeof value,'boolean');assert.equal(JSON.stringify(event).includes('PRIVATE'),false);assert.equal(JSON.stringify(event).includes('models/'),false);}
+  assert.equal((await response.text()).includes('ai_provider_models'),false);
+ }
+});
+
+test('failed model listing and logging leave a404 rejection released and never dispatch another generation',async()=>{
+ for(const outcome of ['http','invalid','large','network','logging']){
+  const h=harness({diagnostic:outcome==='logging'?()=>{throw Error('Synthetic logger failure');}:undefined,fetcher:async(url)=>{
+   if(url.pathname!=='/v1beta/models')return Response.json({error:{status:'NOT_FOUND'}},{status:404});
+   if(outcome==='network')throw Error('PRIVATE_KEY_MARKER');if(outcome==='http')return new Response('PRIVATE',{status:403});if(outcome==='invalid')return new Response('PRIVATE',{status:200});if(outcome==='large')return new Response('x'.repeat(262145));return Response.json({models:[]});
+  }});
+  assert.equal((await h.send('profile_briefing','Synthetic input.')).status,502);assert.equal(h.fetches.length,2);assert.equal(h.pending().length,0);assert.equal(h.rpcs.filter(x=>x.name==='ai_release_call').length,1);assert.equal(JSON.stringify(h.diagnostics).includes('PRIVATE'),false);
+ }
 });

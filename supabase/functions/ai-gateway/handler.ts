@@ -1,8 +1,9 @@
+import {geminiModelProbe,type GeminiModelProbeEvent} from './adapters/gemini-model-probe.ts';
 import {sanitizeProviderDiagnostic,type ProviderDiagnosticEvent} from '../_shared/provider-diagnostics.ts';
 import {cacheKey,clampPrompt,GatewayError,parseBody,priceUsage,ProviderError,type Config,type GatewayInput,type ProviderResult} from '../_shared/contracts.ts';
 import {gemini} from './adapters/gemini.ts';
 import {astra} from './adapters/astra.ts';
-type Dependencies={env:(key:string)=>string|undefined;client:(url:string,key:string)=>any;fetcher?:typeof fetch;diagnostic?:(event:ProviderDiagnosticEvent)=>void};
+type Dependencies={env:(key:string)=>string|undefined;client:(url:string,key:string)=>any;fetcher?:typeof fetch;diagnostic?:(event:ProviderDiagnosticEvent|GeminiModelProbeEvent)=>void};
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 type PeopleSearchInput={query:string;start:number};
 /** Accept the public JSON envelope or the existing tool's plain query; validate before spend. */
@@ -67,7 +68,7 @@ export function createGateway(deps:Dependencies){return async(req:Request):Promi
    if(deps.env('AI_PROCESSING_ENABLED')!=='true'||deps.env('AI_PROVIDER_DATA_CONTROLS_CONFIRMED')!=='true')throw new GatewayError(503,'AI processing is not enabled with the required data controls.');
    const {data:reservation,error:reserveError}=await db.rpc('ai_reserve_call',{p_feature:config.feature,p_user_id:uid,p_request_id:id,p_max_tokens:prepared.maxTokens});
    if(reserveError)throw sqlError(reserveError);
-   let dispatched=false;
+   let dispatched=false;let geminiKey:string|undefined;
    try{
     // Use the config snapshot returned by the same transaction that reserved its cost.
     config=reservation.config;prepared=clampPrompt(input,config);hash=await cacheKey(uid,prepared,config);
@@ -75,6 +76,7 @@ export function createGateway(deps:Dependencies){return async(req:Request):Promi
     // Keys and provider-specific policy checks use the authoritative reserved configuration.
     const providerKey=config.provider==='gemini'?(deps.env('GEMINI_API_KEY')?.trim()||deps.env('Gemini AOI Key')?.trim()):deps.env(config.provider==='astra'?'OPENAI_API_KEY':'GOOGLE_SEARCH_API_KEY')?.trim();
     if(!providerKey)throw new GatewayError(503,'The model provider is not configured.');
+    if(config.provider==='gemini')geminiKey=providerKey;
     if(config.provider==='gemini'&&deps.env('GEMINI_PAID_PROJECT_CONFIRMED')!=='true')throw new GatewayError(503,'Gemini requires a paid project with no training use.');
     if(config.provider==='google_search'&&(deps.env('GOOGLE_SEARCH_ENABLED')!=='true'||!deps.env('GOOGLE_SEARCH_ENGINE_ID')))throw new GatewayError(503,'Existing Google Programmable Search access is not configured.');
     // Reserve the parent first: rejected or duplicate requests cannot spend on child tools.
@@ -118,6 +120,7 @@ export function createGateway(deps:Dependencies){return async(req:Request):Promi
     return output.text;
    }catch(e){
     if(e instanceof ProviderError){const diagnostic=sanitizeProviderDiagnostic(e.diagnostic);if(diagnostic){try{deps.diagnostic?.({event:'ai_provider_failure',requestId:id,...diagnostic});}catch{/* Diagnostics must never interfere with confirmation or reservation release. */}}}
+    if(e instanceof ProviderError&&e.diagnostic?.provider==='gemini'&&e.diagnostic.httpStatus===404&&geminiKey&&deps.diagnostic){const availability=await geminiModelProbe(geminiKey,deps.fetcher);try{deps.diagnostic({event:'ai_provider_models',requestId:id,...availability});}catch{/* Probe logging must not affect release. */}}
     if(!dispatched||(e instanceof ProviderError&&e.noCharge)){
      const {data:released,error:releaseError}=await db.rpc('ai_release_call',{p_id:id,p_definitive_no_charge:e instanceof ProviderError&&e.noCharge});
      if(releaseError||released!==true)throw new GatewayError(503,'The failed request still has a pending reservation. Do not retry automatically.','release_pending');

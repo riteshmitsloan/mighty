@@ -21,17 +21,19 @@ Recommended positioning: Human Flourishing, with AI Apps as an alternative. The 
 - Live Supabase: anonymous relationship reads return an empty array; anonymous writes and publishable-key `ai_precheck` calls are refused with SQLSTATE 42501.
 - Live gateway: a valid anonymous request returns 401; an invalid body returns 400.
 - Live quota test: a transactional cap of three admitted three calls and refused the fourth. The test rolled back afterward.
-- Local tests: migrations 001–006 apply in PGlite; RLS, reservation caps, immutable facts, inbox retries, import retries, and atomic settings patches are covered. 172 app tests, 35 extension/parser/popup tests, and 12 UI regression checks pass.
+- Local tests: migrations 001–006 apply in PGlite; RLS, reservation caps, immutable facts, inbox retries, import retries, and atomic settings patches are covered. 174 app tests, 35 extension/parser/popup tests, and 12 UI regression checks pass.
 - The production build passes and packages the versioned extension ZIP for the app download.
 - Browser parser checks: a synthetic 19,000-connection ZIP parsed in 0.39 seconds; an exact 2 GiB synthetic mailbox scanned in 1.65 seconds using a Worker and native IndexedDB. This is a synthetic received-body-heavy fixture, not a measured memory ceiling or a guarantee for every real mailbox. All four browser fixture checks passed.
 - Browser UI: reviewed desktop and 390-pixel mobile layouts, goal persistence across navigation/reload, keyboard dialog dismissal, and local import entry.
 - Live temporary-account security: own-row roundtrip passed; cross-account writes were refused with 42501. The cross-account read used an empty random namespace, not a populated second account.
-- Gemini features were enabled with explicit approval. Real profile and routing calls were rejected upstream; the diagnostic routing call returned provider HTTP 404 NOT_FOUND. Reservations were released, and no confirmed model cost is claimed.
+- Gemini features were enabled with explicit approval. Real profile and routing calls were rejected upstream; the diagnostic routing call returned provider HTTP 404 NOT_FOUND. A bounded model-list probe succeeded and listed the configured models with generation support. The rolled-back reservation check returned the expected exact model ID. Generation remains unresolved; reservations were released, and no confirmed model cost is claimed.
+
+- The approved disposable account and all scoped records were deleted after failed reservations were released. Cleanup verified zero Auth and application rows; its local credential file was removed.
 
 ## Still to verify
 
 - A complete app journey in the browser and live extension behavior on LinkedIn.
-- Resolve the provider model/access rejection and complete a real `profile_briefing` call with measured usage and confirmed cost. Remove the approved disposable test account after checking its reservations.
+- Resolve the provider model/access rejection and complete a real `profile_briefing` call with measured usage and confirmed cost.
 - Existing Google search credentials, web search results, and observed latency.
 - Full `supabase db reset`: the local database runtime is unavailable on this machine.
 - Checkpoint submissions. The GitHub destination is https://github.com/riteshmitsloan/mighty.
