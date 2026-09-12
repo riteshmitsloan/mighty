@@ -1,0 +1,11 @@
+node_modules/
+dist/
+extension/dist/
+.env
+.env.*
+!.env.example
+.sites-runtime/
+work/
+outputs/
+.DS_Store
+*.log
