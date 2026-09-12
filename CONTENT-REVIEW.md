@@ -16,4 +16,6 @@ The content needed fewer explanations and more precise actions. The implementati
 
 The review also uncovered behavior defects. A committed save is now separate from a failed list refresh, with a read-only refresh action. Notes belong to a specific person and do not follow navigation to another person. Account changes clear the active drafts.
 
-Remaining product decisions: the extension currently opens as a Chrome popup; an inline LinkedIn panel has not been implemented. Account sign-up remains excluded as requested, so cloud saves and model calls need an existing connected account. Google web search still needs its provider configuration.
+Private owner sign-in was subsequently approved. It lives in Me → Settings, with a visible Sign in entry for the local workspace. Email-link failures include a retry action, and successful requests identify the submitted address. Device files stay available after sign-in through an explicit review and selection; conflicts never trigger an automatic overwrite. Saving those sources also saves a copied goal, including an intentionally empty goal.
+
+Remaining product decisions: the extension currently opens as a Chrome popup; an inline LinkedIn panel has not been implemented. Public signup, invites, and onboarding remain excluded. Google web search still needs its provider configuration.

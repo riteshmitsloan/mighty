@@ -20,3 +20,7 @@ label{display:block;color:#33313D;font-size:13px;font-weight:600;line-height:1.5
 @media(max-width:720px){input,textarea,select,.relationship-tools input,.relationship-tools>select{font-size:16px}.tabs button{min-height:44px}.icon-button{min-width:44px;min-height:44px}}
 @media(max-width:500px){.nav-item{font-size:13px;min-height:44px}.today-prompts .button{font-size:14px;min-height:44px}.tabs button{font-size:13px}.nav-count{display:none}}
 @media(max-width:780px){.app{grid-template-rows:auto 1fr}.sidebar{align-content:start;align-self:start;grid-template-rows:auto auto}}
+
+.account-entry{display:flex;align-items:center;justify-content:flex-end;gap:14px;margin-bottom:20px}.account-signin{max-width:620px}.account-signin form{margin-top:14px}.account-signin>p,.account-signin form>p{margin-top:10px;color:var(--body);font-size:14px}.account-signin>.button{margin-top:18px}.account-signin .form-error{color:var(--coral)}
+
+.device-sources-panel>p{margin-top:10px;color:var(--body);font-size:14px}.device-sources-panel fieldset{border:0;padding:0;margin:18px 0}.device-sources-panel legend{font-size:13px;font-weight:600;margin-bottom:8px}.device-sources-panel fieldset label{display:flex;align-items:center;gap:10px;margin:8px 0;font-size:14px}.device-sources-panel input[type=checkbox]{width:18px;height:18px;margin:0;flex:none}.device-sources-panel ul{padding-left:20px;font-size:13px;margin:8px 0}

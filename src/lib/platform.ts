@@ -1,4 +1,6 @@
 import {createClient} from '@supabase/supabase-js';
+import {ownerCallbackError} from './owner-auth';
+export const authCallbackNotice=typeof window==='undefined'?null:ownerCallbackError(window.location.href);
 export const PROJECT_URL=import.meta.env.VITE_SUPABASE_URL||'';
 export const PUBLIC_KEY=import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY||'';
 export const db=PROJECT_URL&&PUBLIC_KEY?createClient(PROJECT_URL,PUBLIC_KEY):null;

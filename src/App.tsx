@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useMemo,useRef,useState,useId,type FormEvent} from 'react';
 import {ArrowLeft,ArrowRight,ChevronRight,Compass,ExternalLink,House,Plus,Sparkles,Target,Users,X} from 'lucide-react';
-import {db,gatewayForAccount,saveSettings} from './lib/platform';
+import {db,gatewayForAccount,saveSettings,authCallbackNotice} from './lib/platform';
 import {readLinkedInArchive,type ArchiveProgress} from './lib/archive';
 import {extractResumePdf} from './lib/resume';
 import workerSrc from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
@@ -13,15 +13,19 @@ import DiscoverPanel from './components/DiscoverPanel';
 import {Avatar,Dialog,EmptyState,formatDate,MightyMark,StagePill,stageLabels,Tabs} from './components/DesignPrimitives';
 import RelationshipViews,{personHeadline,Timeline,type RelationshipView} from './components/RelationshipViews';
 import MePanel,{type MeTab} from './components/MePanel';
+import AccountPanel from './components/AccountPanel';
+import DeviceSourcesPanel from './components/DeviceSourcesPanel';
+import {copyDeviceHandoff,type HandoffPreview} from './lib/owner-handoff';
 const personTabs=['Context','Updates','History'] as const;
 const stages=['saved','contacted','in_conversation','staying_in_touch'];
 const label=(s:string)=>s.replaceAll('_',' ');
 const message=(e:unknown)=>e instanceof Error?e.message:'The action could not be completed.';
 export default function App(){
- const [page,setPage]=useState<string>('Today'),[uid,setUid]=useState<string|null>(null),[ready,setReady]=useState(false),[sources,setSources]=useState<LocalSources>({}),[pool,setPool]=useState<Connection[]>([]),[people,setPeople]=useState<Person[]>([]),[events,setEvents]=useState<Capture[]>([]),[strategy,setStrategy]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(''),[progress,setProgress]=useState(''),[remaining,setRemaining]=useState<number|null>(null),[modal,setModal]=useState(false),[selected,setSelected]=useState(''),[noteDrafts,setNoteDrafts]=useState<Record<string,{body:string;kind:string}>>({}),[refreshPending,setRefreshPending]=useState(false);
+ const [page,setPage]=useState<string>(authCallbackNotice?'Me':'Today'),[uid,setUid]=useState<string|null>(null),[ready,setReady]=useState(false),[sources,setSources]=useState<LocalSources>({}),[pool,setPool]=useState<Connection[]>([]),[people,setPeople]=useState<Person[]>([]),[events,setEvents]=useState<Capture[]>([]),[strategy,setStrategy]=useState(''),[notice,setNotice]=useState(authCallbackNotice||''),[busy,setBusy]=useState(''),[progress,setProgress]=useState(''),[remaining,setRemaining]=useState<number|null>(null),[modal,setModal]=useState(false),[selected,setSelected]=useState(''),[noteDrafts,setNoteDrafts]=useState<Record<string,{body:string;kind:string}>>({}),[refreshPending,setRefreshPending]=useState(false);
  const [extensionId,setExtensionId]=useState(()=>localStorage.getItem('mighty-extension-id')||''),[extensionStatus,setExtensionStatus]=useState('Not connected'),[ownEmail,setOwnEmail]=useState('');
+ const [accountEmail,setAccountEmail]=useState('');
  const [relationshipView,setRelationshipView]=useState<RelationshipView>('List');
- const [meTab,setMeTab]=useState<MeTab>('Profile');
+ const [meTab,setMeTab]=useState<MeTab>(authCallbackNotice?'Settings':'Profile');
  const [personTab,setPersonTab]=useState<typeof personTabs[number]>('Context');
  const [captureOpen,setCaptureOpen]=useState(false);
  const selectedRef=useRef(selected);selectedRef.current=selected;
@@ -37,6 +41,7 @@ export default function App(){
  const key=uid||'device-draft';
  const localKey=useRef(key);const accountGeneration=useRef(0);const renderGeneration=accountGeneration.current;
  const actionLock=useRef(false);const goalDirty=useRef(false);const refreshGeneration=useRef(0);
+ const goalEditVersion=useRef(0);
  const isCurrent=()=>localKey.current===key&&accountGeneration.current===renderGeneration;
  const refresh=useCallback(async()=>{
   if(!uid||localKey.current!==uid||accountGeneration.current!==renderGeneration)return;
@@ -47,17 +52,17 @@ export default function App(){
  useEffect(()=>{
   if(!db){setReady(true);return;}
   let mounted=true;let authEvents=0;
-  const applyAccount=(nextUid:string|null)=>{
+  const applyAccount=(nextUid:string|null,email='')=>{
    if(!mounted)return;
    const nextKey=nextUid||'device-draft';
    if(localKey.current!==nextKey){
     localKey.current=nextKey;accountGeneration.current++;goalDirty.current=false;
     setPeople([]);setEvents([]);setPool([]);setSources({});setStrategy('');setSelected('');setNoteDrafts({});setRefreshPending(false);setModal(false);setCaptureOpen(false);setPage('Today');setRemaining(null);setOwnEmail('');setNotice('');setProgress('');
    }
-   setUid(nextUid);setReady(true);
+   setUid(nextUid);setAccountEmail(email);setReady(true);
   };
-  void db.auth.getSession().then(({data,error})=>{if(!mounted||authEvents)return;if(error)setNotice(error.message);applyAccount(data.session?.user.id||null);});
-  const {data}=db.auth.onAuthStateChange((_event,session)=>{authEvents++;applyAccount(session?.user.id||null);});
+  void db.auth.getSession().then(({data,error})=>{if(!mounted||authEvents)return;if(error)setNotice(error.message);applyAccount(data.session?.user.id||null,data.session?.user.email||'');}).catch(error=>{if(mounted&&!authEvents){setReady(true);setNotice(message(error));}});
+  const {data}=db.auth.onAuthStateChange((_event,session)=>{authEvents++;applyAccount(session?.user.id||null,session?.user.email||'');});
   return()=>{mounted=false;data.subscription.unsubscribe();};
  },[]);
  useEffect(()=>{
@@ -97,6 +102,19 @@ export default function App(){
  };
  const retryRefresh=()=>run('Refreshing list',async()=>{await refresh();if(isCurrent()){setRefreshPending(false);setNotice('Your list is up to date.');}});
  const updateSources=async(patch:LocalSources,destination:string)=>{await keepLocal(destination,patch);if(isCurrent()&&localKey.current===destination)setSources(s=>({...s,...patch}));};
+ const useDeviceSources=async(preview:HandoffPreview):Promise<boolean>=>{
+  if(!uid||preview.destinationUid!==uid||!isCurrent()||actionLock.current)return false;
+  let copied=false;const goalVersion=goalEditVersion.current;
+  await run('Using device files',async()=>{
+   const result=await copyDeviceHandoff(preview);
+   if(!isCurrent()||result.destinationUid!==uid)return;
+   setSources(current=>({...current,...result.snapshot}));
+   if(typeof result.snapshot.strategy==='string'&&goalEditVersion.current===goalVersion){goalDirty.current=true;setStrategy(result.snapshot.strategy);}
+   copied=true;setNotice('Your selected files are available here. Use Save to account to store them online.');
+   setPage('Me');setMeTab("Things you've learned");
+  });
+  return copied;
+ };
  const connections=useMemo(()=>sources.archive?archiveConnections(sources.archive):pool,[sources.archive,pool]);
  const employers=useMemo(()=>sources.archive?.layer1.positions.map(p=>p['Company Name']||p.Company||'').filter(Boolean)||[],[sources.archive]);
  const savedUrls=useMemo(()=>new Set(people.map(p=>p.profile_url).filter((s):s is string=>!!s)),[people]);
@@ -106,15 +124,17 @@ export default function App(){
  const importResume=async(file:File)=>{const destination=key;await run('Reading resume',async()=>{const resume=await extractResumePdf(file,{workerSrc,onProgress:(done,total)=>{if(isCurrent())setProgress(`${done} of ${total} pages read`);}});await updateSources({resume},destination);if(isCurrent())setNotice('Resume text is ready on this device.');});};
  const syncSources=async()=>run('Saving sources',async()=>{
   if(!uid)throw Error('An active account session is needed to save sources. Your imports are still on this device.');
+  const goalToSave=typeof sources.strategy==='string'||goalDirty.current?strategy:undefined;
   if(sources.archive)await saveArchive(uid,sources.archive,n=>{if(isCurrent())setProgress(`${n.toLocaleString()} connections saved`);});
   if(sources.resume)await saveResume(uid,sources.resume);if(sources.mailbox)await saveMailbox(uid,sources.mailbox);
+  if(goalToSave!==undefined)await saveSettings({strategy:goalToSave},uid);
   if(isCurrent())setNotice('Sources saved to your account.');
   if((!sources.archive&&!sources.resume)||!isCurrent())return;
   try{await synthesizer(key)({layer1:sources.archive?.layer1||null,resumeText:sources.resume?.text||''});if(isCurrent())setNotice('Sources saved to your account.');}
   catch(e){if(isCurrent())setNotice('Sources saved. Mighty could not finish preparing your context. Try again later.');}
  });
  const importMailbox=async(file:File)=>{const destination=key;await run('Reading mailbox',async()=>{const result=await new Promise<MailboxWorkerResult>((resolve,reject)=>{const worker=new Worker(new URL('./lib/mbox.worker.ts',import.meta.url),{type:'module'});mailboxWorker.current=worker;const requestId=crypto.randomUUID();worker.onmessage=(event:MessageEvent<MboxWorkerResponse>)=>{const result=event.data;if(result.requestId!==requestId)return;if(result.type==='progress'){if(isCurrent())setProgress(`${result.progress.counts.messages.toLocaleString()} messages · ${result.progress.counts.contacts.toLocaleString()} contacts counted · ${Math.round(result.progress.bytesRead / 1048576).toLocaleString()} MB read`);return;}worker.terminate();mailboxWorker.current=null;if(result.type==='complete')resolve(result.result);else reject(Error(result.type==='cancelled'?'Mailbox import cancelled. Your earlier sources remain available.':result.message));};worker.onerror=()=>{worker.terminate();mailboxWorker.current=null;reject(Error('The mailbox worker stopped. Your earlier imports remain available.'));};worker.postMessage({type:'parse',requestId,accountKey:destination,file,ownAddresses:ownEmail.split(/[,;\s]+/).filter(Boolean),accountHolderName:sources.archive?.verifiedAccountHolder?.fullName});});await updateSources({mailbox:result},destination);if(isCurrent())setNotice(`Mailbox analyzed locally: ${result.summary.counts.messages.toLocaleString()} messages, ${result.summary.globalMetrics.bidirectionalContacts.toLocaleString()} two-way contacts. Received bodies were never decoded.`);});};
- function editStrategy(value:string){goalDirty.current=true;setStrategy(value);void keepLocal(key,{strategy:value}).catch(e=>{if(isCurrent())setNotice(message(e));});}
+ function editStrategy(value:string){goalEditVersion.current++;goalDirty.current=true;setStrategy(value);void keepLocal(key,{strategy:value}).catch(e=>{if(isCurrent())setNotice(message(e));});}
  async function saveStrategy(){const destination=key;await run('Saving goal',async()=>{await updateSources({strategy},destination);if(uid)await saveSettings({strategy},uid);if(isCurrent())setNotice(uid?'Your goal is saved.':'Your goal is saved on this device.');});}
  const rebuildArchive=async()=>{const destination=key;await run('Loading saved archive',async()=>{const blob=await savedArchiveBlob(uid);const result=await readLinkedInArchive(blob);await updateSources({archive:result},destination);if(isCurrent())setNotice('Knowledge base rebuilt from the sanitized saved archive.');});};
  function selectPerson(person: Person) {setSelected(person.id); setPersonTab('Context'); setPage('Person');}
@@ -162,14 +182,15 @@ export default function App(){
   <main id="main-content" tabIndex={-1} className={`main main-${page.toLowerCase()}`}>
    <div className="ambient ambient-indigo" aria-hidden="true"/><div className="ambient ambient-coral" aria-hidden="true"/>
    <div className={`content content-${page.toLowerCase()}`}>
+    {!uid && ready && !(page==='Me'&&meTab==='Settings') && <div className="account-entry"><span className="muted small">Local workspace</span><button type="button" className="text-button" disabled={Boolean(busy)} onClick={()=>openMe('Settings')}>Sign in<ArrowRight size={14}/></button></div>}
     {notice && <div className="notice" role="status"><span>{notice}</span>{refreshPending && <button type="button" className="text-button" disabled={Boolean(busy)} onClick={() => void retryRefresh()}>Refresh list</button>}<button className="icon-button" aria-label="Dismiss notice" onClick={() => setNotice('')}><X size={16}/></button></div>}
     {busy && <div className="import-progress" role="status"><span className="busy-dot"/><strong>{busy}</strong>{progress && <span>{progress}</span>}</div>}
     {page === 'Today' && <>
      <header className="today-heading"><h1>{greeting}{firstName ? `, ${firstName}` : ''}.</h1></header>
      <section className="start-card">
       {featuredPerson ? <Avatar name={featuredPerson.person} tone={1}/> : <span className="start-symbol"><Users size={23}/></span>}
-      <div><p className="eyebrow">{openPromise ? 'Open promise' : featuredPerson ? 'Recently saved' : 'Start here'}</p><h2>{openPromise ? featuredPerson.person : featuredPerson ? featuredPerson.person : connections.length ? 'Find your next connection.' : 'Start with your network.'}</h2><p>{openPromise?.body || (featuredPerson ? String(featuredPerson.context.saveReason || 'No reason recorded yet.') : connections.length ? 'Search your connections by role or company.' : 'Import your LinkedIn archive to explore your connections.')}</p></div>
-      <button className="button primary" onClick={() => featuredPerson ? selectPerson(featuredPerson) : connections.length ? openExplore() : openMe("Things you've learned")}>{featuredPerson ? 'Open context' : connections.length ? 'Explore network' : 'Import archive'}</button>
+      <div><p className="eyebrow">{openPromise ? 'Open promise' : featuredPerson ? 'Recently saved' : 'Start here'}</p><h2>{openPromise ? featuredPerson.person : featuredPerson ? featuredPerson.person : connections.length ? 'Find your next connection.' : 'Start with your network.'}</h2><p>{openPromise?.body || (featuredPerson ? String(featuredPerson.context.saveReason || 'No reason recorded yet.') : connections.length ? 'Search your connections by role or company.' : uid ? 'Import sources or use the files already in this browser.' : 'Import your LinkedIn archive to explore your connections.')}</p></div>
+      <button className="button primary" onClick={() => featuredPerson ? selectPerson(featuredPerson) : connections.length ? openExplore() : openMe("Things you've learned")}>{featuredPerson ? 'Open context' : connections.length ? 'Explore network' : uid ? 'Choose sources' : 'Import archive'}</button>
      </section>
      <div className="today-prompts">{!connections.length && <button className="button secondary" onClick={openExplore}>Explore</button>}{people.length > 0 && <button className="button secondary" onClick={() => setCaptureOpen(true)}>Record an update</button>}</div>
      {otherPeople.length > 0 && <section className="today-next"><div className="section-heading"><h2 className="eyebrow muted">{otherPeople.length ? 'Keep in mind' : 'Recent activity'}</h2>{otherPeople.length > 0 && <button className="text-button" onClick={() => setPage('Relationships')}>View all<ArrowRight size={13}/></button>}</div>{otherPeople.length ? otherPeople.map((person, index) => <button className="today-row" key={person.id} onClick={() => selectPerson(person)}><Avatar name={person.person} size="small" tone={index}/><span><strong>{person.person}</strong><span>{String(person.context.saveReason || personHeadline(person) || 'Saved by you')}</span></span><ChevronRight size={16}/></button>) : <div className="quiet-empty"><span className="quiet-line"/><p>{featuredPerson ? 'No other saved people.' : 'No activity captured yet.'}</p></div>}</section>}
@@ -177,7 +198,7 @@ export default function App(){
     </>}
     {page === 'Relationships' && <RelationshipViews key={key} people={people} events={events} strategy={strategy} view={relationshipView} onView={setRelationshipView} busy={Boolean(busy)} onOpen={selectPerson} onAdd={() => setModal(true)} onExplore={openExplore} onStage={updateStage}/>}
     {page === 'Explore' && <><header className="page-heading"><p className="eyebrow">Explore</p><h1>{exploreMode === 'ask' ? 'What’s on your mind?' : 'Who should I know?'}</h1></header><DiscoverPanel key={key} all={connections} strategy={strategy} employers={employers} savedUrls={savedUrls} call={gatewayForAccount(uid)} onSave={newPerson} onRemaining={value => {if (isCurrent()) setRemaining(value);}} focusRequest={exploreFocus} mode={exploreMode}/></>}
-    {page === 'Me' && <MePanel key={key} tab={meTab} onTab={setMeTab} sources={sources} people={people} connectionCount={connections.length} strategy={strategy} onStrategy={editStrategy} onSaveStrategy={saveStrategy} onExplore={openExplore} uid={uid} busy={Boolean(busy)} ownEmail={ownEmail} onOwnEmail={setOwnEmail} onArchive={importArchive} onResume={importResume} onMailbox={importMailbox} onRebuild={rebuildArchive} onSync={syncSources} extensionId={extensionId} extensionStatus={extensionStatus} onExtensionId={value => {setExtensionId(value); localStorage.setItem('mighty-extension-id', value);}}/>}
+    {page === 'Me' && <MePanel key={key} tab={meTab} onTab={setMeTab} sources={sources} people={people} connectionCount={connections.length} strategy={strategy} onStrategy={editStrategy} onSaveStrategy={saveStrategy} onExplore={openExplore} devicePanel={uid?<DeviceSourcesPanel key={uid} uid={uid} busy={Boolean(busy)} onCopy={useDeviceSources}/>:null} accountPanel={<AccountPanel client={db} uid={uid} email={accountEmail} busy={Boolean(busy)} ready={ready}/>} uid={uid} busy={Boolean(busy)} ownEmail={ownEmail} onOwnEmail={setOwnEmail} onArchive={importArchive} onResume={importResume} onMailbox={importMailbox} onRebuild={rebuildArchive} onSync={syncSources} extensionId={extensionId} extensionStatus={extensionStatus} onExtensionId={value => {setExtensionId(value); localStorage.setItem('mighty-extension-id', value);}}/>}
     {page === 'Person' && (selectedPerson ? <>
      <button className="back-link" onClick={() => setPage('Relationships')}><ArrowLeft size={15}/>Relationships</button>
      <header className="person-heading"><Avatar name={selectedPerson.person} size="large" tone={3}/><div><h1>{selectedPerson.person}</h1>{personHeadline(selectedPerson) && <p>{personHeadline(selectedPerson)}</p>}</div><StagePill stage={selectedPerson.stage}/></header>

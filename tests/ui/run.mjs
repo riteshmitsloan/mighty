@@ -2,7 +2,7 @@ import {spawn} from 'node:child_process';
 import {copyFile, mkdtemp, realpath, rm} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {tmpdir} from 'node:os';
-import {delimiter, join} from 'node:path';
+import {delimiter, join, resolve, dirname} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {appDependencyStubs} from './mocks.mjs';
 
@@ -13,6 +13,7 @@ const appFile = await realpath(join(checkoutRoot, 'src', 'App.tsx'));
 const requireFromCheckout = createRequire(join(checkoutRoot, 'package.json'));
 const {build} = requireFromCheckout('esbuild');
 const outputDirectory = await mkdtemp(join(tmpdir(), 'mighty-ui-tests-'));
+const stubPaths=new Map(['./lib/local-sources','./lib/owner-handoff'].map(path=>[resolve(dirname(appFile),path),path]));
 
 try {
   await build({
@@ -32,9 +33,8 @@ try {
       name: 'app-ui-boundaries',
       setup(builder) {
         builder.onResolve({filter: /.*/}, args => {
-          if (args.importer === appFile && Object.hasOwn(appDependencyStubs, args.path)) {
-            return {path: args.path, namespace: 'ui-test-stub'};
-          }
+          const key=args.importer===appFile&&Object.hasOwn(appDependencyStubs,args.path)?args.path:args.path.startsWith('.')?stubPaths.get(resolve(dirname(args.importer),args.path)):undefined;
+          if(key)return {path:key,namespace:'ui-test-stub'};
         });
         builder.onLoad({filter: /.*/, namespace: 'ui-test-stub'}, args => ({
           contents: appDependencyStubs[args.path],
@@ -45,8 +45,20 @@ try {
   });
   const testFile = join(outputDirectory, 'app.test.cjs');
   await copyFile(new URL('./app.test.cjs', import.meta.url), testFile);
+  await build({entryPoints:[join(checkoutRoot,'src/components/AccountPanel.tsx'),join(checkoutRoot,'src/lib/owner-auth.ts')],outdir:outputDirectory,entryNames:'[name]',outExtension:{'.js':'.cjs'},bundle:true,platform:'node',format:'cjs',jsx:'automatic',packages:'external'});
+  const accountTestFile=join(outputDirectory,'account.test.cjs');
+  await copyFile(new URL('./account.test.cjs',import.meta.url),accountTestFile);
+  const handoffPath=join(checkoutRoot,'src/lib/device-handoff.ts');
+  await build({entryPoints:[join(checkoutRoot,'src/components/DeviceSourcesPanel.tsx')],outfile:join(outputDirectory,'panel.cjs'),bundle:true,platform:'node',format:'cjs',jsx:'automatic',packages:'external',loader:{'.css':'empty'},plugins:[{name:'device-panel-boundaries',setup(builder){
+    builder.onResolve({filter:/\/local-sources$/},()=>({path:'local',namespace:'device-fixture'}));
+    builder.onResolve({filter:/\/owner-handoff$/},()=>({path:'handoff',namespace:'device-fixture'}));
+    builder.onLoad({filter:/.*/,namespace:'device-fixture'},({path})=>({contents:path==='local'?'export const localSources=key=>globalThis.__DEVICE_PANEL__.readLocal(key);':`export {HANDOFF_FIELDS} from ${JSON.stringify(handoffPath)}; export const prepareDeviceHandoff=(...args)=>globalThis.__DEVICE_PANEL__.prepare(...args);`,loader:'js',resolveDir:checkoutRoot}));
+  }}]});
+  await build({entryPoints:[handoffPath],outfile:join(outputDirectory,'handoff.cjs'),bundle:true,platform:'node',format:'cjs'});
+  const deviceTestFile=join(outputDirectory,'device-panel.test.cjs');
+  await copyFile(new URL('./device-panel.test.cjs',import.meta.url),deviceTestFile);
   const childStatus = await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['--test', testFile], {
+    const child = spawn(process.execPath, ['--test', testFile, accountTestFile, deviceTestFile], {
       cwd: checkoutRoot,
       stdio: 'inherit',
       env: {

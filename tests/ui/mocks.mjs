@@ -5,6 +5,7 @@ const state = 'const state = () => globalThis.__MIGHTY_UI_TEST__;';
 
 export const appDependencyStubs = {
   './lib/platform': `${state}
+    export const authCallbackNotice = null;
     export const db = {
       auth: {
         getSession: async () => ({
@@ -54,6 +55,12 @@ export const appDependencyStubs = {
     export const extractResumePdf = (file, options) => state().readResume(file, options);
   `,
   './lib/inbox': 'export const watchInbox = () => () => {};',
+  './lib/local-sources': `${state} export const localSources=key=>state().localSources(key);`,
+  './lib/owner-handoff': `${state}
+    export const HANDOFF_FIELDS=['archive','resume','mailbox','strategy'];
+    export const prepareDeviceHandoff=(...args)=>state().prepareHandoff(...args);
+    export const copyDeviceHandoff=(...args)=>state().copyHandoff(...args);
+  `,
   './lib/extension-bridge': 'export const startExtensionBridge = () => ({dispose() {}, sync() {}});',
   'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url': 'export default "unused-test-worker";',
 };

@@ -114,3 +114,60 @@ test('an uncommitted save failure leaves the note draft available for correction
  s.readRelationships=async()=>({people:[person('a','Alpha')],events:[]});s.capture=async()=>{throw Error('Write refused')};await boot();await click('Record an update');await input(document.querySelector('dialog select'),'a');await input(document.querySelector('dialog textarea'),'Keep this draft');
  const form=document.querySelector('.capture-form');await act(async()=>{props(form).onSubmit({preventDefault(){}});await tick();});assert.equal(document.querySelector('dialog textarea').value,'Keep this draft');assert.match(document.querySelector('dialog').textContent,/Write refused/);assert.equal(button('Refresh list'),undefined);
 });
+
+test('an explicitly copied device goal is saved with its sources only after Save to account',async()=>{
+ const device={archive:archive(),strategy:'Copied device goal'};
+ const copies=[],settingsWrites=[];
+ s.localSources=async key=>key==='device-draft'?device:{};
+ s.settings=async()=>({data:{data:{strategy:''}},error:null});
+ s.prepareHandoff=async(uid,fields)=>({destinationUid:uid,fields:[...fields],fingerprint:'synthetic-handoff',conflicts:[]});
+ s.copyHandoff=async preview=>{copies.push(preview);return {destinationUid:preview.destinationUid,fields:preview.fields,fingerprint:preview.fingerprint,snapshot:device};};
+ s.saveSettings=async(patch,uid)=>settingsWrites.push({patch,uid});
+ await boot();assert.equal(copies.length,0);assert.equal(settingsWrites.length,0);
+ await click('Me');await click("Things you've learned");await click('Review device files');
+ assert.equal(copies.length,0,'Review must not copy or save sources.');
+ await click('Use selected files');
+ assert.equal(copies.length,1);assert.deepEqual(copies[0].fields,['archive','strategy']);
+ assert.equal(settingsWrites.length,0,'A local handoff must not write the cloud goal.');
+ assert.equal(button('Save to account').disabled,false);
+ await click('Save to account');
+ assert.deepEqual(settingsWrites,[{patch:{strategy:'Copied device goal'},uid:'user-a'}]);
+ assert.match(text(),/Sources saved to your account/);
+});
+
+test('Save goal accepts an explicit empty string and clears the connected account goal',async()=>{
+ const writes=[];
+ s.settings=async()=>({data:{data:{strategy:'Existing saved goal'}},error:null});
+ s.saveSettings=async(patch,uid)=>writes.push({patch,uid});
+ await boot();await openGoal();assert.equal(document.querySelector('textarea').value,'Existing saved goal');
+ await input(document.querySelector('textarea'),'');
+ assert.equal(button('Save goal').disabled,false,'A cleared goal must remain saveable.');
+ assert.deepEqual(s.localWrites.at(-1),{key:'user-a',patch:{strategy:''}});
+ assert.equal(writes.length,0,'Typing must not silently write account settings.');
+ const form=document.querySelector('.goal-editor form');
+ await act(async()=>{props(form).onSubmit({preventDefault(){}});await tick();});
+ assert.deepEqual(writes,[{patch:{strategy:''},uid:'user-a'}]);
+ assert.equal(document.querySelector('textarea').value,'');assert.match(text(),/Your goal is saved/);
+});
+
+test('newer goal typing survives deferred handoff completion and is used by the later account save',async()=>{
+ const completion=deferred();
+ const device={archive:archive(),strategy:'Older goal from device copy'};
+ const writes=[];let copiedPreview;
+ s.localSources=async key=>key==='device-draft'?device:{};
+ s.settings=async()=>({data:{data:{strategy:''}},error:null});
+ s.prepareHandoff=async(uid,fields)=>({destinationUid:uid,fields:[...fields],fingerprint:'synthetic-delayed-handoff',conflicts:[]});
+ // The local transaction has committed, but its final account check/result is
+ // delayed. Typing in this interval must remain newer than that copied snapshot.
+ s.copyHandoff=async preview=>{copiedPreview=preview;return completion.promise;};
+ s.saveSettings=async(patch,uid)=>writes.push({patch,uid});
+ await boot();await click('Me');await click("Things you've learned");await click('Review device files');await click('Use selected files');
+ assert.ok(copiedPreview);await click('Goal');
+ await input(document.querySelector('textarea'),'Newer goal typed while the handoff finishes');
+ assert.deepEqual(s.localWrites.at(-1),{key:'user-a',patch:{strategy:'Newer goal typed while the handoff finishes'}});
+ await act(async()=>{completion.resolve({destinationUid:copiedPreview.destinationUid,fields:copiedPreview.fields,fingerprint:copiedPreview.fingerprint,snapshot:device});await tick();});
+ await click('Goal');assert.equal(document.querySelector('textarea').value,'Newer goal typed while the handoff finishes');
+ assert.equal(writes.length,0);
+ await click("Things you've learned");await click('Save to account');
+ assert.deepEqual(writes,[{patch:{strategy:'Newer goal typed while the handoff finishes'},uid:'user-a'}]);
+});

@@ -18,7 +18,11 @@ Deploy `supabase/functions/ai-gateway` with `verify_jwt=false`. The function ver
 
 Provider features start disabled. Set the server environment from `.env.example`, verify the account's provider data controls, and enable reviewed registry entries. Google Programmable Search requires an existing eligible search account. Free model features still have daily call and dollar limits.
 
-The authentication/signup/onboarding module is deliberately out of scope. Account-backed operations require an existing provisioned account session; local import parsing does not.
+Private owner sign-in is available in **Me → Settings**. Provision an existing owner in Supabase Auth, activate that account, and create its application profile and usage limits before sending a link. Public signup, invites, and onboarding remain excluded. Local imports work without signing in.
+
+The sign-in form sends a one-time email link with account creation disabled. Open it in the browser where the imports were added. Signing in does not move or upload device files: use **Review device files**, choose the sources, then **Use selected files**. **Save to account** stores the selected sources and goal online. Conflicting account sources are preserved and must be deselected before copying. Signing out only ends the session on that device.
+
+For local development, Supabase's Site URL is `http://127.0.0.1:5173/`, with that address and `http://localhost:5173/` explicitly allowed as redirects. Keep public signup disabled and email confirmation enabled. A deployed app requires its exact origin in the Auth redirect list and gateway allowed origins before sign-in can work there.
 
 ## Privacy and evidence
 
