@@ -10,7 +10,8 @@
     "test": "tsx --test tests/*.test.ts",
     "install:ci": "npm ci",
     "test:extension": "cd extension && node scripts/check.mjs && node scripts/test.mjs && node --test tests/popup-render.test.mjs",
-    "test:ui": "node tests/ui/run.mjs"
+    "test:ui": "node tests/ui/run.mjs",
+    "publish:pages": "npm run build && node scripts/publish-app.mjs"
   },
   "dependencies": {
     "@fontsource-variable/dm-sans": "^5.3.0",

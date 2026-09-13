@@ -1,0 +1,2 @@
+# Preserve generated vendor bundles exactly, including whitespace inside literals.
+docs/assets/* -whitespace linguist-generated=true

@@ -37,6 +37,18 @@ test('insecure remote, credential-bearing and non-web redirect origins fail befo
   }
   assert.equal(calls.length,0);
 });
+test('hosted owner links return to the Mighty app directory with no callback or redirect parameters',async()=>{
+ const origin='https://riteshmitsloan.github.io';
+ for(const path of ['/mighty','/mighty/','/mighty/index.html?next=https://other.test/#access_token=fixture'])assert.equal(ownerLinkRequest('owner@example.test',origin+path).options.emailRedirectTo,origin+'/mighty/');
+ window.location.href=origin+'/mighty/?code=fixture#ignored';
+ await render();await edit('owner@example.test');await submit();
+ assert.deepEqual(calls,[{email:'owner@example.test',options:{shouldCreateUser:false,emailRedirectTo:origin+'/mighty/'}}]);
+});
+test('another repository on the hosted origin cannot request a Mighty sign-in callback',async()=>{
+ const origin='https://riteshmitsloan.github.io';
+ for(const path of ['/','/other/','/mighty-other/','/mighty/../other/','/mighty/%2e%2e/other/','/mighty/%2f../other/'])await assert.rejects(sendOwnerLink(client,'owner@example.test',origin+path),/Open the Mighty app/);
+ assert.equal(calls.length,0);
+});
 test('invalid email never reaches auth; local part casing and plus addressing are retained',async()=>{
   for(const email of ['','bad address','person@','<person>@example.test','a'.repeat(255)+'@example.test']) await assert.rejects(sendOwnerLink(client,email,'https://mighty.example.test'));
   assert.equal(calls.length,0);

@@ -19,7 +19,14 @@ export function ownerLinkRequest(email: string, currentUrl: string): OwnerLinkRe
   if (url.username || url.password || (url.protocol !== 'https:' && !(url.protocol === 'http:' && local))) {
     throw Error('Sign in from the secure Mighty site or the local app.');
   }
-  return {email: normalized, options: {shouldCreateUser: false, emailRedirectTo: `${url.origin}/`}};
+  let appBase = `${url.origin}/`;
+  if (url.hostname === 'riteshmitsloan.github.io') {
+    if (url.port || (url.pathname !== '/mighty' && !url.pathname.startsWith('/mighty/')) || /%(?:2f|5c)/i.test(url.pathname)) {
+      throw Error('Open the Mighty app at https://riteshmitsloan.github.io/mighty/ to sign in.');
+    }
+    appBase = 'https://riteshmitsloan.github.io/mighty/';
+  }
+  return {email: normalized, options: {shouldCreateUser: false, emailRedirectTo: appBase}};
 }
 
 export async function sendOwnerLink(client: OwnerAuthClient, email: string, currentUrl: string): Promise<string> {

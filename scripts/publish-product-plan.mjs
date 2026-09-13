@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 const {parseHTML} = require('linkedom');
 const plan = resolve(root, 'work/product-plan/mighty-product-plan.html');
 try {await access(plan);} catch {console.log('No local plan source; retaining the published snapshot.'); process.exit(0);}
-const target = resolve(root, 'docs');
+const target = resolve(root, 'docs/plan');
 const brand = resolve(root, 'work/logo-review');
 // An explicit asset list keeps unrelated working files out of the public site.
 const assets = ['current-logo-source-proof.json', 'marks/current-logo.svg',

@@ -4,6 +4,10 @@ Mighty. Intentional, intelligent networking.
 
 Mighty helps a person turn a networking intention into a relationship they continue: bring their own context, find someone relevant, understand the evidence, save that person, and capture the next step. The user always decides and sends.
 
+## Live application
+
+Open [Mighty](https://riteshmitsloan.github.io/mighty/). The static app is hosted on GitHub Pages and uses the configured Supabase backend. The [living product plan](https://riteshmitsloan.github.io/mighty/plan/) is a separate reference.
+
 ## Run locally
 
 Requires Node.js 22 or newer. Run `npm ci`, copy `.env.example` to `.env`, set the public Supabase URL and publishable key, then run `npm run dev`. Only public values belong in `VITE_` variables. No model key, service key, raw archive, or mailbox belongs in Git.
@@ -22,7 +26,7 @@ Private owner sign-in is available in **Me → Settings**. Provision an existing
 
 The sign-in form sends a one-time email link with account creation disabled. Open it in the browser where the imports were added. Signing in does not move or upload device files: use **Review device files**, choose the sources, then **Use selected files**. **Save to account** stores the selected sources and goal online. Conflicting account sources are preserved and must be deselected before copying. Signing out only ends the session on that device.
 
-For local development, Supabase's Site URL is `http://127.0.0.1:5173/`, with that address and `http://localhost:5173/` explicitly allowed as redirects. Keep public signup disabled and email confirmation enabled. A deployed app requires its exact origin in the Auth redirect list and gateway allowed origins before sign-in can work there.
+For local development, Supabase's Site URL is `http://127.0.0.1:5173/`, with that address and `http://localhost:5173/` explicitly allowed as redirects. Keep public signup disabled and email confirmation enabled. The hosted app requires `https://riteshmitsloan.github.io/mighty/` in the Auth redirect list and `https://riteshmitsloan.github.io` in the gateway allowed origins. Keep both local redirect URLs for development.
 
 ## Privacy and evidence
 
@@ -36,9 +40,9 @@ See [CHECKPOINTS.md](CHECKPOINTS.md) for the submission context, demo story, and
 
 ## Living product plan
 
-The [product plan and build record](https://riteshmitsloan.github.io/mighty/) is published from `main` and `/docs` on GitHub Pages. It records implemented features, verification results, remaining work, algorithms, pricing assumptions and the approved brand book. Local review notes stay in the viewer's browser.
+The [product plan and build record](https://riteshmitsloan.github.io/mighty/plan/) is published from `main` and `/docs` on GitHub Pages. It records implemented features, verification results, remaining work, algorithms, pricing assumptions and the approved brand book. Local review notes stay in the viewer's browser.
 
-The editable plan remains in the local `work/product-plan` directory. On that workspace, a successful production build regenerates the plan and `scripts/publish-product-plan.mjs` prepares the public snapshot with an explicit list of brand assets. It checks document links, fragments and CSS font references before publication. Commit the refreshed `docs/` snapshot and push `main` to update the website. A checkout without the local plan source retains the published snapshot and still builds the app normally.
+The editable plan remains in the local `work/product-plan` directory. On that workspace, a successful production build regenerates the plan and `scripts/publish-product-plan.mjs` prepares the public snapshot with an explicit list of brand assets. It checks document links, fragments and CSS font references before publication. Run `npm run publish:pages` to package the app at the site root and retain the plan under `/plan/`. The publisher copies only application assets and the current extension download, excluding unrelated design files. Commit the refreshed `docs/` snapshot and push `main` to deploy. A checkout without the local plan source retains the published snapshot and still builds the app normally.
 
 ## Design and content
 

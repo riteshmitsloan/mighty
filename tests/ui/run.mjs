@@ -28,7 +28,7 @@ try {
     loader: {'.css': 'empty'},
     // The mailbox worker is outside this suite. Supplying its base URL avoids
     // changing the original App or emitting an import.meta warning in CJS.
-    define: {'import.meta.url': JSON.stringify(pathToFileURL(appFile).href)},
+    define: {'import.meta.url': JSON.stringify(pathToFileURL(appFile).href), 'import.meta.env.BASE_URL': JSON.stringify('./')},
     plugins: [{
       name: 'app-ui-boundaries',
       setup(builder) {

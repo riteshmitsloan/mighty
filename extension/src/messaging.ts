@@ -1,10 +1,14 @@
 import{hasSubstantiveProfile}from'./profile.js';
 import{validCurrentExperienceAnchor}from'../../src/lib/current-experience';
-import{canonicalProfileURL,exactOrigin}from'./urls.js';
+import{canonicalProfileURL,exactAppURL}from'./urls.js';
 import type{PendingSave,Profile,PublicConfig,SaveInput,Session}from'./types.js';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export function isExternalSender(sender:{url?:string;origin?:string;id?:string},allowedOrigins:string[]):boolean{
- if(sender.id)return false;return Boolean(sender.url&&allowedOrigins.some(origin=>exactOrigin(sender.url!,origin))&&(!sender.origin||allowedOrigins.some(origin=>exactOrigin(sender.origin!,origin))));
+ if(sender.id||!sender.url)return false;
+ try{
+  const url=new URL(sender.url);
+  return (!sender.origin||sender.origin===url.origin)&&allowedOrigins.some(app=>exactAppURL(sender.url!,app));
+ }catch{return false;}
 }
 export function parseExternalMessage(input:unknown):{type:'connect';accessToken:string}|{type:'disconnect'}|{type:'status'}{
  if(!input||typeof input!=='object'||Array.isArray(input))throw Error('Invalid bridge message.');

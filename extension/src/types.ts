@@ -8,6 +8,7 @@ export type SearchResult={profileUrl:string;name:string;subtitle:string;profileR
 export type PageState='ready'|'empty'|'blocked'|'auth_required'|'unknown';
 export type PageSnapshot={kind:'profile';state:PageState;profile:Profile|null;message:string}|{kind:'search';state:PageState;results:SearchResult[];message:string;pageUrl?:string}|{kind:'unsupported';state:'unknown';message:string};
 export type GoalFit={reason:string;label:'Goal overlap'|'Possible goal overlap'|'No clear goal overlap'|'Not enough context';evidence:Anchor[]};
+/** appOrigins preserves the legacy config name; entries include an optional app base path. */
 export type PublicConfig={appOrigins:string[];supabaseUrl:string;publishableKey:string};
 export type Session={userId:string;accessToken:string;expiresAt:number;strategy:string;goalContext?:AccountGoalContext};
 export type SaveInput={operationId:string;userId:string;profile:Profile;source:'rendered_profile'|'search_result'};

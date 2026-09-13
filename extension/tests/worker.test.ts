@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {runInNewContext} from 'node:vm';
 import {fileURLToPath} from 'node:url';
 import {build} from 'esbuild';
-const config = {appOrigins:['https://mighty.example'],supabaseUrl:'https://project.supabase.co',publishableKey:'sb_publishable_fixture'};
+const config = {appOrigins:['https://riteshmitsloan.github.io/mighty/','https://mighty.example'],supabaseUrl:'https://project.supabase.co',publishableKey:'sb_publishable_fixture'};
 const {outputFiles} = await build({entryPoints:[fileURLToPath(new URL('../src/worker.ts',import.meta.url))],bundle:true,write:false,platform:'browser',format:'iife',target:'chrome120',metafile:true,define:{__PUBLIC_CONFIG__:JSON.stringify(config)}});
 const uid='11111111-1111-4111-a111-111111111111',other='22222222-2222-4222-a222-222222222222';
 const now='2026-09-12T12:00:00Z';
@@ -52,4 +52,19 @@ test('popup refresh loads changed saved version, while failure and token expiry 
 test('read-active still reinjects exactly once after extension content reload',async()=>{
   const h=runtime();h.state.failFirstRead=true;const result=await h.send({type:'mighty:read_active'});
   assert.equal(result.ok,true);assert.equal(result.snapshot.kind,'profile');assert.equal(h.state.reinject,1);assert.equal(h.state.tabSends,2);assert.equal(h.calls.length,0);
+});
+test('hosted external messages and persistent ports both reject sibling repositories before handoff',async()=>{
+ const h=runtime(),origin='https://riteshmitsloan.github.io';
+ for(const path of ['/','/other-project/','/mighty-evil/']){
+  const response:any=await new Promise(resolve=>h.events.external({type:'mighty:connect',protocol:1,accessToken:token()},{url:origin+path,origin},resolve));
+  assert.equal(response.ok,false);assert.equal(h.calls.length,0);
+  let disconnected=false,ready=false;
+  h.events.bridge({name:'mighty:bridge',sender:{url:origin+path,origin},disconnect(){disconnected=true;},postMessage(){ready=true;}});
+  assert.equal(disconnected,true);assert.equal(ready,false);
+ }
+ const connected:any=await new Promise(resolve=>h.events.external({type:'mighty:connect',protocol:1,accessToken:token()},{url:origin+'/mighty/',origin},resolve));
+ assert.equal(connected.ok,true);assert.equal(connected.appOrigin,origin+'/mighty/');assert.equal(h.calls.length,2);
+ let ready=false;
+ h.events.bridge({name:'mighty:bridge',sender:{url:origin+'/mighty/',origin},disconnect(){assert.fail('valid hosted bridge disconnected');},postMessage(value:any){ready=value.type==='mighty:ready';}});
+ assert.equal(ready,true);
 });
