@@ -2,12 +2,15 @@ import {useEffect, useId, useRef, useState} from 'react';
 import {Plus, X} from 'lucide-react';
 import {createGoal, goalContentKey, normalizeGoal, reviseGoal, type Goal, type GoalCriterion, type GoalKind} from '../lib/goals';
 import type {GoalSwitcherProps} from './GoalSwitcher';
+import GoalCoach, {goalCoachContextKey, type GoalCoachCall} from './GoalCoach';
+import type {GoalCoachContext} from '../lib/goal-coach';
 import './GoalsPanel.css';
 
 export type GoalsPanelProps = GoalSwitcherProps & {
   onSave: (goal: Goal) => Promise<void>;
   notice?: string;
   draftKey?: string;
+  coach?: GoalCoachCall;
 };
 type CriterionDraft = Omit<GoalCriterion, 'terms'> & {text: string; preservedTerms?: readonly string[]};
 type Draft = {id: string; createdAt: string; base: Goal | null; kind: GoalKind; title: string; outcome: string; status: Goal['status']; questions: string; criteria: CriterionDraft[]; dirty: boolean; awaitingCommit?: boolean};
@@ -22,7 +25,13 @@ const fromGoal = (goal: Goal): Draft => ({id: goal.id, createdAt: goal.createdAt
 
 const storageKey = (key?: string) => key && key.length <= 200 ? `mighty:goal-drafts:v1:${encodeURIComponent(key)}` : null;
 const MAX_DRAFT_BYTES = 131_072;
+const ACTIVE_ACCOUNT_REQUIRED = 'An active account is required to save goals.';
+const INACTIVE_WORKSPACE_MESSAGE = 'You’re signed in, but this workspace isn’t active for account saves. Ask the person who set up your account to activate it, then try Save goal again. Your edits are still here.';
+const inactiveWorkspaceNotices = new Set([ACTIVE_ACCOUNT_REQUIRED, `Your edit is kept on this device. ${ACTIVE_ACCOUNT_REQUIRED}`, `Your unfinished edit is preserved. ${ACTIVE_ACCOUNT_REQUIRED}`]);
+const goalSaveError = (cause: unknown) => cause instanceof Error && cause.message === ACTIVE_ACCOUNT_REQUIRED
+  ? INACTIVE_WORKSPACE_MESSAGE : 'Couldn’t save this goal. Your edits are still here. Try again.';
 const draftInput = (draft: Draft) => ({kind: draft.kind, title: draft.base && draft.title === draft.base.title ? draft.base.title : draft.title.trim(), outcome: draft.outcome, status: draft.status, openQuestions: draft.base && draft.questions === draft.base.openQuestions.join('\n') ? draft.base.openQuestions : draft.questions.split('\n').map(line => line.trim()).filter(Boolean), criteria: draft.criteria.filter(criterion => criterion.text.trim() || criterion.preservedTerms !== undefined).map(({text, preservedTerms, ...criterion}) => ({...criterion, terms: preservedTerms ?? terms(text)}))});
+const coachContext = (draft: Draft): GoalCoachContext => {const {status: _status, ...context} = draftInput(draft); return context;};
 const sameContent = (first: Goal, second: Goal) => goalContentKey(first) === goalContentKey(second);
 function matchesDraft(draft: Draft, goal: Goal) {
   try {return sameContent(createGoal(draftInput(draft), {id: draft.id, now: draft.createdAt}), goal);} catch {return false;}
@@ -50,7 +59,9 @@ function restoreDrafts(key?: string): {drafts: Record<string, Draft>; editing?: 
       const criteria: CriterionDraft[] = value.criteria.map((criterion: CriterionDraft) => {
         if (!criterion || !validText(criterion.id,100) || !/^[\w-]+$/.test(criterion.id) || !Object.hasOwn(fields,criterion.field) || !validText(criterion.label,200) || !validText(criterion.text,16000) || !['required','preferred'].includes(criterion.importance) || !['opportunity','contact'].includes(criterion.appliesTo) || !['user','suggested'].includes(criterion.origin)) throw Error();
         const original = base?.criteria.find(item => item.id === criterion.id);
-        return {id:criterion.id,field:criterion.field,label:criterion.label,text:criterion.text,importance:criterion.importance,appliesTo:criterion.appliesTo,origin:criterion.origin,...(original && original.terms.join(', ') === criterion.text ? {preservedTerms:original.terms} : {})};
+        const preserved = criterion.preservedTerms;
+        if (preserved !== undefined && (!Array.isArray(preserved) || preserved.length > 20 || preserved.some(term => !validText(term,200) || !term.trim()) || preserved.join(', ') !== criterion.text)) throw Error();
+        return {id:criterion.id,field:criterion.field,label:criterion.label,text:criterion.text,importance:criterion.importance,appliesTo:criterion.appliesTo,origin:criterion.origin,...(preserved !== undefined ? {preservedTerms:preserved} : original && original.terms.join(', ') === criterion.text ? {preservedTerms:original.terms} : {})};
       });
       if (new Set(criteria.map(criterion => criterion.id)).size !== criteria.length) throw Error();
       result[entryKey] = {id:value.id,createdAt:value.createdAt,base,kind:value.kind,title:value.title,outcome:value.outcome,status:value.status,questions:value.questions,criteria,dirty:true};
@@ -63,7 +74,7 @@ function restoreDrafts(key?: string): {drafts: Record<string, Draft>; editing?: 
 export default function GoalsPanel(props: GoalsPanelProps) {
   return <GoalEditor key={props.draftKey ?? 'memory-only'} {...props}/>;
 }
-function GoalEditor({goals, activeGoalId, onSelect, onSave, busy = false, notice, draftKey}: GoalsPanelProps) {
+function GoalEditor({goals, activeGoalId, onSelect, onSave, busy = false, notice, draftKey, coach}: GoalsPanelProps) {
   const id = useId();
   const [restored] = useState(() => restoreDrafts(draftKey));
   const [editing, setEditing] = useState(restored.editing || activeGoalId || goals[0]?.id || NEW);
@@ -153,23 +164,42 @@ function GoalEditor({goals, activeGoalId, onSelect, onSave, busy = false, notice
       if (!mounted.current) return;
       updateDrafts(previous => {const next = {...previous, [goal.id]: {...fromGoal(goal),awaitingCommit:true}}; if (editing === NEW) delete next[NEW]; return next;},goal.id);
       setEditing(goal.id); setMessage('Goal saved.');
-    } catch {
-      if (mounted.current) setError('Couldn’t save this goal. Your edits are still here. Try again.');
+    } catch (cause) {
+      if (mounted.current) setError(goalSaveError(cause));
     } finally {
       lock.current = false;
       if (mounted.current) setSaving(false);
     }
   };
+  const applyCoach = (proposal: GoalCoachContext, expected: GoalCoachContext): boolean => {
+    if (lock.current || currentProps.current.busy || !draft || stale) return false;
+    const latest = draftState.current[editing] || draft;
+    if (goalCoachContextKey(coachContext(latest)) !== goalCoachContextKey(expected)) return false;
+    const existingCriteria = draftInput(latest).criteria;
+    const criteria = proposal.criteria.map(criterion => {
+      const existing = existingCriteria.find(item => item.id === criterion.id);
+      const same = existing && existing.field === criterion.field && existing.label === criterion.label && existing.importance === criterion.importance && existing.appliesTo === criterion.appliesTo && JSON.stringify(existing.terms) === JSON.stringify(criterion.terms);
+      const confirmed = same ? existing : {...criterion,origin:'user' as const};
+      const {terms: values, ...metadata} = confirmed;
+      return {...metadata,text:values.join(', '),preservedTerms:values};
+    });
+    change({kind:proposal.kind,title:proposal.title,outcome:proposal.outcome,questions:proposal.openQuestions.join('\n'),criteria});
+    return true;
+  };
   const missingFundraising = draft?.kind === 'fundraising' ? (['stage', 'check_size'] as const).filter(field => !draft.criteria.some(criterion => criterion.field === field && criterion.text.trim())) : [];
+  const inactiveWorkspace = inactiveWorkspaceNotices.has(notice ?? '');
+  const visibleNotice = inactiveWorkspace ? INACTIVE_WORKSPACE_MESSAGE : notice;
+  const visibleError = inactiveWorkspace && error === INACTIVE_WORKSPACE_MESSAGE ? '' : error;
 
   return <section className="goals-panel" aria-labelledby={`${id}-heading`}>
     <div className="section-heading"><div><h2 id={`${id}-heading`}>Your goals</h2><p className="muted small">A clear outcome makes the next conversation easier to choose.</p></div><button type="button" className="button secondary small" disabled={disabled} onClick={() => chooseEditor(NEW)}><Plus size={15}/>Add goal</button></div>
-    {notice && <p className="notice" role="status">{notice}</p>}
+    {visibleNotice && <p className="notice" role={inactiveWorkspace ? 'alert' : 'status'}>{visibleNotice}</p>}
     {goals.length > 0 && <div className="goal-cards">{goals.map(goal => <article key={goal.id} className={`panel goal-card ${goal.id === editing ? 'is-editing' : ''}`}>
       <div className="goal-card-meta"><span>{kinds[goal.kind]}</span><span className={`pill ${goal.id === activeGoalId ? '' : 'neutral'}`}>{goal.status === 'active' ? goal.id === activeGoalId ? 'Current goal' : 'Active' : goal.status === 'paused' ? 'Paused' : 'Completed'}</span></div>
       <h3>{goal.title}</h3><p>{goal.outcome}</p>
       <div className="row-actions"><button type="button" className="text-button" disabled={disabled} aria-label={`Edit ${goal.title}`} onClick={() => chooseEditor(goal.id)}>Edit goal{drafts[goal.id]?.dirty ? ' · Unsaved' : ''}</button>{goal.status === 'active' && goal.id !== activeGoalId && <button type="button" className="text-button" disabled={disabled} onClick={() => {if (!lock.current && !currentProps.current.busy) {chooseEditor(goal.id); onSelect(goal.id);}}}>Use this goal</button>}</div>
     </article>)}</div>}
+    {draft && <GoalCoach key={draft.id} context={coachContext(draft)} storageScope={draftKey ? JSON.stringify([draftKey,draft.id]) : undefined} coach={coach} disabled={disabled || stale} onApply={applyCoach} onInteract={() => {if (editing === NEW && !draftState.current[editing]?.dirty) change({});}}/>}
     {draft ? <form className="panel content-panel goal-detail-form" aria-label={draft.base ? 'Edit goal' : 'Add goal'} onSubmit={event => {event.preventDefault(); void save();}}>
       <div className="section-heading"><h3>{draft.base ? 'Goal details' : 'What are you working toward?'}</h3>{draft.dirty && <span className="muted small">Unsaved edits</span>}</div>
       {stale && <div className="goal-conflict" role="alert"><p>This goal changed elsewhere. Your edits are still here.</p>{selected && <button type="button" className="text-button" disabled={disabled} onClick={() => {if (!lock.current && !currentProps.current.busy) {updateDrafts(previous => ({...previous, [editing]: fromGoal(selected)})); setError(''); setMessage('Loaded the saved version.');}}}>Replace these edits with the saved version</button>}</div>}
@@ -194,7 +224,7 @@ function GoalEditor({goals, activeGoalId, onSelect, onSave, busy = false, notice
         {missingFundraising.length > 0 && <p className="goal-unanswered">{missingFundraising.map(field => field === 'stage' ? 'Stage' : 'Investor check size').join(' and ')}: unanswered. Add these when known.</p>}
         <details className="goal-extra"><summary>Open questions and goal status</summary><label>Questions to resolve<textarea value={draft.questions} rows={3} maxLength={31000} placeholder="One question per line" onChange={event => change({questions: event.target.value})}/></label><label>Status<select value={draft.status} onChange={event => change({status: event.target.value as Goal['status']})}><option value="active">Active</option><option value="paused">Paused</option><option value="completed">Completed</option></select></label><p className="muted small">Paused and completed goals stay saved and leave the active goal switcher.</p></details>
       </fieldset>
-      {error && <p className="form-error" role="alert">{error}</p>}
+      {visibleError && <p className="form-error" role="alert">{visibleError}</p>}
       {message && <p className="goal-save-notice" role="status">{message}</p>}
       {storageNotice && <p className="goal-save-notice" role="status">{storageNotice}</p>}
       <div className="row-actions goal-save-actions"><button className="button primary" disabled={disabled || stale}>{saving ? 'Saving…' : 'Save goal'}</button><span className="muted small">{draftKey ? 'Unfinished edits stay in this browser for this workspace. Save to update the goal.' : 'Unsaved edits stay here while you switch goals. Save before leaving this page.'}</span></div>

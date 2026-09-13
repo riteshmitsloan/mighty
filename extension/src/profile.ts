@@ -80,6 +80,21 @@ function sduiSubject(main:Element,profileUrl:string):{heading:Element;top:Elemen
  if(markers.some(marker=>!marker.contains(heading)||marker.closest('section')!==top))return null;
  return{heading,top,scope,card};
 }
+/** A URL-bound header can hydrate before its old sections disappear. Explicit
+ * section identity must agree before any raw or typed evidence is attributed. */
+function sduiSectionSubjectCurrent(section:Element,profileUrl:string):boolean{
+ const selector='[componentkey^="Profile_Top_Level_"],[componentkey^="ProfileVerificationTriggerRef-"]';
+ const markers=[...(section.matches(selector)?[section]:[]),...section.querySelectorAll(selector)].filter(rendered);
+ return markers.every(marker=>{
+  const key=marker.getAttribute('componentkey')||'';
+  const slug=key.startsWith('ProfileVerificationTriggerRef-')?key.slice('ProfileVerificationTriggerRef-'.length)
+   :key.match(/^Profile_Top_Level_[A-Za-z][A-Za-z0-9_]*Section(.*)$/)?.[1];
+  if(!slug)return false;
+  // Encode the identifier as one path segment. Query/fragment/path suffixes in
+  // malformed markers must not be normalized into a seemingly matching URL.
+  try{return canonicalProfileURL('https://www.linkedin.com/in/'+encodeURIComponent(decodeURIComponent(slug))+'/')===profileUrl;}catch{return false;}
+ });
+}
 /** Ownership controls must come from this verified card, never the page sidebar. */
 export function profileTopCard(doc:Document,url:string):Element|null{
  const profileUrl=canonicalProfileURL(url),main=doc.querySelector('main');if(!profileUrl||!main||blockedState(doc,url))return null;
@@ -122,6 +137,7 @@ export function readProfile(doc:Document,url:string,now=new Date().toISOString()
  if(!subject)return null;
  const{heading,top,scope}=subject,name=textOf(heading,Infinity);if(!name)return null;
  const truncationReasons:string[]=[];if(name.length>200)truncationReasons.push('name_limit');
+ let subjectChanging=false;
  const anchors:Anchor[]=[],seen=new Set<string>();
  // Preserve complete rendered evidence. Storage limits reject a whole save, never trim its facts.
  const add=(kind:AnchorKind,text:string,fragment:string,typed?:Pick<Anchor,'field'|'currentExperience'>)=>{text=text.replace(/\s+/g,' ').trim();const key=kind+'\0'+(typed?.field||'')+'\0'+text+'\0'+(typed?.currentExperience?.entryText||'');if(text&&text!==name&&!seen.has(key)){seen.add(key);anchors.push({kind,text,sourceUrl:profileUrl+'#'+fragment,observedAt:now,...typed});}};
@@ -131,6 +147,7 @@ export function readProfile(doc:Document,url:string,now=new Date().toISOString()
   let section:Element|null=null;for(const id of ids){const exact=scope.querySelector('[id="'+id+'"]');if(exact){section=exact.closest('section');if(section)break;}}
   if(!section){const h=Array.from(scope.querySelectorAll('h2,h3')).find(x=>rendered(x)&&label.test(textOf(x,100)));section=h?.closest('section')||null;}
   if(!section||!rendered(section)||(!classic&&section===scope))continue;
+  if(!classic&&!sduiSectionSubjectCurrent(section,profileUrl)){subjectChanging=true;continue;}
   const id=ids[0];
   if(kind==='activity'){
    const selector='article,[data-activity-item],[data-urn*="urn:li:activity:"],.feed-shared-update-v2';
@@ -162,7 +179,7 @@ export function readProfile(doc:Document,url:string,now=new Date().toISOString()
  const missingSections:AnchorKind[]=(['experience','education','location','skills','languages','certifications','activity'] as AnchorKind[]).filter(kind=>!anchors.some(anchor=>anchor.kind===kind));
  const photoUrl=profilePhoto(top,name,profileUrl,'card'in subject?subject.card:undefined);
  const profile:Profile={profileUrl,name,...(photoUrl?{photoUrl}:{}),anchors,profileReadAt:null,truncated:truncationReasons.length>0,truncationReasons,missingSections};
- profile.profileReadAt=!truncationReasons.length&&hasSubstantiveProfile(profile)?now:null;
+ profile.profileReadAt=!subjectChanging&&!truncationReasons.length&&hasSubstantiveProfile(profile)?now:null;
  if(new TextEncoder().encode(JSON.stringify(profile)).byteLength>49152){profile.truncationReasons.push('snapshot_size_limit');profile.truncated=true;profile.profileReadAt=null;}
  return profile;
 }

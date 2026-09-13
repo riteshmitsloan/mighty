@@ -38,7 +38,9 @@ if (supportedReadURL()) {
     if (!maximum) maximum = setTimeout(read, 900);
   }
   const observer = new MutationObserver(changed);
-  observer.observe(document.documentElement, {childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['src', 'alt', 'class', 'style', 'hidden', 'aria-hidden', 'aria-label']});
+  // SDUI can hydrate the new subject/control identity after the URL and visible
+  // text change. Those final attribute-only updates must retry eligibility too.
+  observer.observe(document.documentElement, {childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['componentkey', 'id', 'href', 'src', 'alt', 'class', 'style', 'hidden', 'aria-hidden', 'aria-label']});
   const routeChanged = () => {if (location.href !== lastUrl) {panel?.dispose(); panel = null; read();}};
   const focus = () => {if (disposed) return; read(); if (!disposed && panel) void panel.refreshAccount(true);};
   addEventListener('popstate', routeChanged); addEventListener('focus', focus);

@@ -149,3 +149,178 @@ test('malformed stored drafts and unavailable storage never break saved goals or
  assert.equal(control('Goal name').value,existing.title);assert.match(text(),/could not be restored/);
  window.localStorage.setItem=()=>{throw Error('Synthetic quota');};await edit('Outcome you want','Still editable');assert.match(text(),/couldn’t keep the latest draft/);await submit();assert.equal(calls[0].outcome,'Still editable');
 });
+
+const coachProposal=(patch={})=>({kind:'career',title:'A leadership move',outcome:'Find a suitable AI leadership role',criteria:[{id:'coach-role',field:'role',label:'Target role',terms:['Chief AI Officer'],importance:'required',appliesTo:'opportunity',origin:'suggested'},{id:'coach-contact',field:'role',label:'People to speak with',terms:['Recruiter'],importance:'preferred',appliesTo:'contact',origin:'suggested'}],openQuestions:['Which industry should I prioritize?'],...patch});
+const chatKey=(account,goalId)=>`mighty:goal-coach:v1:${encodeURIComponent(JSON.stringify([account,goalId]))}`;
+
+test('goal conversation sends only explicitly and reads the current dirty draft without saving it',async()=>{
+ const requests=[];const existing=goal();
+ await render({draftKey:'owner-a',goals:[existing],activeGoalId:existing.id,coach:async(context,messages)=>{requests.push({context,messages});return {message:'Who could help you reach that outcome?',proposal:null};}});
+ await edit('Outcome you want','My current unfinished outcome');await edit('Your answer','I want a leadership role');await render({busy:false});
+ assert.equal(requests.length,0);assert.equal(calls.length,0);
+ await click('Send answer');
+ assert.equal(requests.length,1);assert.equal(requests[0].context.outcome,'My current unfinished outcome');
+ assert.deepEqual(requests[0].messages,[{role:'user',text:'I want a leadership role'}]);
+ assert.match(text(),/Who could help you reach that outcome/);assert.equal(control('Your answer').value,'');
+ assert.equal(control('Outcome you want').value,'My current unfinished outcome');assert.equal(calls.length,0);
+});
+
+test('AI proposals require review and Apply, then the separate save preserves identity, status and version semantics',async()=>{
+ const existing=goal({status:'paused'}),proposal=coachProposal();
+ await render({draftKey:'owner-a',goals:[existing],activeGoalId:null,coach:async()=>({message:'Review these details.',proposal})});
+ await edit('Your answer','Use Chief AI Officer roles and recruiters');await click('Send answer');
+ assert.equal(control('Goal name').value,existing.title);assert.equal(calls.length,0);
+ assert.match(document.querySelector('.goal-coach-preview').textContent,/Required · Opportunity/);
+ assert.match(document.querySelector('.goal-coach-preview').textContent,/Preferred · Person who could help/);
+ await click('Use these details');
+ assert.equal(control('Goal name').value,proposal.title);assert.equal(control('Outcome you want').value,proposal.outcome);assert.equal(control('Status').value,'paused');assert.equal(calls.length,0);
+ assert.match(text(),/Details added to the form/);
+ await submit();assert.equal(calls.length,1);
+ assert.equal(calls[0].id,existing.id);assert.equal(calls[0].createdAt,existing.createdAt);assert.equal(calls[0].version,existing.version+1);assert.equal(calls[0].status,'paused');
+ assert.deepEqual(calls[0].criteria,proposal.criteria.map(c=>({...c,origin:'user'})));
+ assert.deepEqual(calls[0].openQuestions,proposal.openQuestions);
+});
+
+test('unchanged suggestions retain origins and compound alternatives survive Apply plus draft restoration',async()=>{
+ const unchanged={id:'existing-location',field:'location',label:'Region',terms:['New York, NY','Boston'],importance:'required',appliesTo:'opportunity',origin:'suggested'};
+ const existing=goal({criteria:[unchanged]});
+ const proposal=coachProposal({criteria:[{...unchanged,terms:[...unchanged.terms]},...coachProposal().criteria]});
+ await render({draftKey:'owner-a',goals:[existing],activeGoalId:existing.id,coach:async()=>({message:'Review the proposed details.',proposal})});
+ await edit('Your answer','Keep those locations and add the role');await click('Send answer');await click('Use these details');
+ await act(async()=>root.render(null));await render();await submit();
+ assert.deepEqual(calls[0].criteria[0],unchanged);assert.equal(calls[0].criteria[1].origin,'user');
+ assert.deepEqual(calls[0].criteria[0].terms,['New York, NY','Boston']);
+});
+
+test('new-goal answers survive navigation before any details are filled in, without an account save',async()=>{
+ const requests=[];await render({draftKey:'owner-a',coach:async(context,messages)=>{requests.push(messages);return {message:'Which kind of role interests you?',proposal:null};}});
+ await edit('Your answer','Keep this unfinished private intention');
+ const firstChatKey=[...storage.keys()].find(key=>key.startsWith('mighty:goal-coach:'));
+ assert.ok(firstChatKey);assert.equal(calls.length,0);
+ await act(async()=>root.render(null));await render();
+ assert.equal(control('Your answer').value,'Keep this unfinished private intention');assert.equal(control('Goal name').value,'');
+ await click('Send answer');await edit('Your answer','A leadership role');
+ await act(async()=>root.render(null));await render();
+ assert.equal(control('Your answer').value,'A leadership role');assert.match(text(),/Which kind of role interests you/);
+ assert.equal([...storage.keys()].filter(key=>key.startsWith('mighty:goal-coach:')).length,1);assert.ok(storage.has(firstChatKey));assert.equal(requests.length,1);assert.equal(calls.length,0);
+});
+
+test('synchronous duplicate sends dispatch once and failed answers remain editable for an explicit retry',async()=>{
+ const request=deferred(),requests=[];
+ await render({draftKey:'owner-a',coach:(context,messages)=>{requests.push(messages);return request.promise;}});
+ await edit('Your answer','My answer should survive a failed request');
+ await act(async()=>{const handler=reactProps(button('Send answer')).onClick;handler();handler();await tick();});
+ assert.equal(requests.length,1);assert.equal(control('Your answer').disabled,true);
+ await act(async()=>{request.reject(Error('AI is unavailable for this account.'));await tick();});
+ assert.match(text(),/AI is unavailable for this account/);assert.equal(control('Your answer').value,'My answer should survive a failed request');assert.equal(control('Your answer').disabled,false);
+ await render({coach:async(context,messages)=>{requests.push(messages);return {message:'Which location would work?',proposal:null};}});
+ await click('Send answer');assert.equal(requests.length,2);assert.deepEqual(requests[1],requests[0]);assert.equal(calls.length,0);
+});
+
+test('manual edits invalidate both pending replies and previously shown previews without losing the answer',async()=>{
+ const request=deferred();await render({draftKey:'owner-a',coach:()=>request.promise});
+ await edit('Your answer','A useful answer');await click('Send answer');await edit('Outcome you want','A newer manual outcome');
+ await act(async()=>{request.resolve({message:'An obsolete private reply',proposal:coachProposal()});await tick();});
+ assert.doesNotMatch(text(),/An obsolete private reply/);assert.equal(button('Use these details'),undefined);assert.equal(control('Your answer').value,'A useful answer');
+ assert.match(text(),/goal details changed while the reply was loading/);
+ await render({coach:async()=>({message:'Review these current details.',proposal:coachProposal()})});await click('Send answer');
+ await edit('Goal name','A later handwritten name');assert.equal(button('Use these details').disabled,true);await click('Use these details');
+ assert.equal(control('Goal name').value,'A later handwritten name');assert.equal(calls.length,0);
+});
+
+test('account changes hide prior answers and ignore late replies, while returning restores only that account conversation',async()=>{
+ const request=deferred();const existing=goal();
+ await render({draftKey:'owner-a',goals:[existing],activeGoalId:existing.id,coach:()=>request.promise});await edit('Your answer','Private account A answer');await click('Send answer');
+ await render({draftKey:'owner-b',goals:[],activeGoalId:null,coach:undefined});
+ await act(async()=>{request.resolve({message:'Private account A response',proposal:coachProposal()});await tick();});
+ assert.doesNotMatch(text(),/Private account A/);assert.equal(control('Your answer').value,'');assert.match(text(),/Sign in to send/);
+ await edit('Your answer','Account B local answer');
+ await render({draftKey:'owner-a',goals:[existing],activeGoalId:existing.id});
+ assert.equal(control('Your answer').value,'Private account A answer');assert.doesNotMatch(text(),/Account B local answer|Private account A response/);assert.equal(calls.length,0);
+});
+
+test('goal switching restores independent chats and callback rerenders do not reset them',async()=>{
+ const one=goal(),two=goal({kind:'fundraising',title:'Fundraising goal'});
+ await render({draftKey:'owner-a',goals:[one,two],activeGoalId:one.id,coach:async()=>({message:'Which role?',proposal:null})});
+ await edit('Your answer','Career-only answer');await click('Send answer');
+ await click('Edit Fundraising goal');assert.doesNotMatch(text(),/Career-only answer|Which role/);await edit('Your answer','Fundraising-only answer');
+ await render({coach:async()=>({message:'A new callback',proposal:null})});assert.equal(control('Your answer').value,'Fundraising-only answer');
+ await click('Edit Leadership role');assert.match(text(),/Career-only answer|Which role/);assert.equal(control('Your answer').value,'');
+ await click('Edit Fundraising goal');assert.equal(control('Your answer').value,'Fundraising-only answer');assert.equal(calls.length,0);
+});
+
+test('busy or signed-out state never dispatches and a bounded stored history is not silently trimmed',async()=>{
+ const existing=goal(),requests=[];const key=chatKey('owner-a',existing.id);
+ const messages=Array.from({length:20},(_,index)=>({role:index%2?'assistant':'user',text:`Synthetic turn ${index}`}));
+ storage.set(key,JSON.stringify({version:1,input:'One more question',messages}));
+ await render({draftKey:'owner-a',goals:[existing],activeGoalId:existing.id,coach:async()=>{requests.push(1);return {message:'Unexpected',proposal:null};}});
+ assert.equal(button('Send answer').disabled,true);await click('Send answer');assert.equal(requests.length,0);
+ assert.match(text(),/conversation has reached its limit/);assert.equal(JSON.parse(storage.get(key)).messages.length,20);
+ await click('Start a new conversation');await click('Clear conversation');await edit('Your answer','A fresh answer');
+ await render({busy:true});await click('Send answer');assert.equal(requests.length,0);
+ await render({busy:false,coach:undefined});await click('Send answer');assert.equal(requests.length,0);assert.equal(control('Your answer').value,'A fresh answer');
+});
+
+test('starting over requires confirmation and clears only this chat, preserving the current goal and other account data',async()=>{
+ const existing=goal();storage.set('mighty:goal-coach:v1:unrelated','private-other-scope');
+ await render({draftKey:'owner-a',goals:[existing],activeGoalId:existing.id});await edit('Outcome you want','Keep these manual edits');await edit('Your answer','An answer to clear');
+ const key=chatKey('owner-a',existing.id);
+ await click('Start a new conversation');assert.ok(storage.has(key));await click('Keep conversation');assert.equal(control('Your answer').value,'An answer to clear');
+ await click('Start a new conversation');await click('Clear conversation');
+ assert.equal(storage.has(key),false);assert.equal(storage.get('mighty:goal-coach:v1:unrelated'),'private-other-scope');
+ assert.equal(control('Outcome you want').value,'Keep these manual edits');assert.equal(calls.length,0);
+});
+
+test('malformed chat storage and quota failures leave the goal editor and current typed answer usable',async()=>{
+ const existing=goal();storage.set(chatKey('owner-a',existing.id),JSON.stringify({version:1,input:'',messages:[{role:'assistant',text:'untrusted-only assistant'}]}));
+ await render({draftKey:'owner-a',goals:[existing],activeGoalId:existing.id});
+ assert.match(text(),/conversation could not be restored/);assert.doesNotMatch(text(),/untrusted-only assistant/);
+ window.localStorage.setItem=()=>{throw Error('Synthetic storage quota');};await edit('Your answer','Still available on this page');
+ assert.equal(control('Your answer').value,'Still available on this page');assert.match(text(),/browser could not keep your latest answer/);assert.equal(control('Goal name').value,existing.title);
+});
+
+test('proposal preview identifies removed conditions and shows prior scope and importance for changed ones',async()=>{
+ const remove={id:'remove-region',field:'location',label:'Region',terms:['Boston'],importance:'required',appliesTo:'opportunity',origin:'user'};
+ const change={id:'change-role',field:'role',label:'Role',terms:['Chief AI Officer'],importance:'required',appliesTo:'opportunity',origin:'user'};
+ const existing=goal({criteria:[remove,change]});
+ await render({draftKey:'owner-a',goals:[existing],activeGoalId:existing.id,coach:async()=>({message:'Review the changes.',proposal:coachProposal({criteria:[{...change,terms:['Recruiter'],appliesTo:'contact',importance:'preferred',origin:'suggested'}]})})});
+ await edit('Your answer','Show a different contact route');await click('Send answer');
+ assert.match(document.querySelector('.goal-coach-removals').textContent,/Region: BostonRequired · Opportunity/);
+ assert.match(document.querySelector('.goal-coach-before').textContent,/Previously: Role, Chief AI OfficerRequired · Opportunity/);
+ assert.match(document.querySelector('.goal-coach-conditions').textContent,/RecruiterPreferred · Person who could help/);
+ assert.equal(calls.length,0);
+ assert.ok([...document.querySelector('.goals-panel').children].indexOf(document.querySelector('.goal-coach')) < [...document.querySelector('.goals-panel').children].indexOf(document.querySelector('.goal-detail-form')));
+});
+
+test('inactive workspace save explains activation once, keeps all edits and permits an exact retry after activation',async()=>{
+ const inactive=Object.assign(Error('An active account is required to save goals.'),{code:'42501'});
+ await render({draftKey:'private-account',onSave:async next=>{calls.push(next);throw inactive;}});
+ await edit('Goal name','Jayati fixture goal');await edit('Outcome you want','Find a suitable leadership role');await edit('Role','Chief AI Officer');
+ await submit();
+ assert.match(text(),/You’re signed in, but this workspace isn’t active for account saves/);
+ assert.match(text(),/Ask the person who set up your account to activate it/);
+ assert.doesNotMatch(text(),/Couldn’t save this goal|An active account is required|42501/);
+ await render({notice:'Your edit is kept on this device. An active account is required to save goals.'});
+ assert.equal([...document.querySelectorAll('[role=alert]')].filter(element=>element.textContent.includes('workspace isn’t active')).length,1);
+ assert.equal(control('Goal name').value,'Jayati fixture goal');assert.equal(control('Role').value,'Chief AI Officer');assert.equal(button('Save goal').disabled,false);
+ const attempted=calls[0];
+ await render({notice:'',onSave:async next=>{calls.push(next);}});await submit();
+ assert.deepEqual(calls[1],attempted);assert.match(text(),/Goal saved/);assert.doesNotMatch(text(),/workspace isn’t active/);
+});
+
+test('inactive workspace notice on load is actionable without claiming missing setup versus paused status',async()=>{
+ await render({notice:'Your edit is kept on this device. An active account is required to save goals.'});
+ assert.match(text(),/workspace isn’t active/);assert.match(text(),/Your edits are still here/);
+ assert.doesNotMatch(text(),/profile was never created|account is paused|email|Supabase|42501/);
+ assert.equal(calls.length,0);
+});
+
+test('unrelated permission failures remain generic and late activation errors cannot appear in another account',async()=>{
+ await render({draftKey:'account-a',onSave:async()=>{throw Object.assign(Error('Private unrelated database detail'),{code:'42501'});}});
+ await edit('Goal name','Private draft A');await edit('Outcome you want','A real outcome');await submit();
+ assert.match(text(),/Couldn’t save this goal/);assert.doesNotMatch(text(),/Private unrelated database detail|workspace isn’t active/);
+ const request=deferred();await render({onSave:()=>request.promise});await submit();
+ await render({draftKey:'account-b',notice:''});
+ await act(async()=>{request.reject(Error('An active account is required to save goals.'));await tick();});
+ assert.equal(control('Goal name').value,'');assert.doesNotMatch(text(),/Private draft A|workspace isn’t active|Couldn’t save/);
+});

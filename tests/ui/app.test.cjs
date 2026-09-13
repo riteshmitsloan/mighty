@@ -59,7 +59,7 @@ for(const [label,knowledge] of [
  assert.ok(button('Today'),'The signed-in app remains rendered.');
  await click('Me');await click("Things you've learned");
  assert.match(text(),/7 connections/);assert.match(text(),/Save to account/);
- await openGoal();assert.equal(document.querySelector('textarea').value,'Server goal');
+ await openGoal();assert.equal(document.querySelector('.goal-detail-form textarea').value,'Server goal');
  assert.deepEqual(savedArchive,before,'A rejected derived summary never changes the source archive.');
  assert.equal(writes,0);assert.equal(calls,0);assert.equal(s.localWrites.length,0);
 });
@@ -215,7 +215,7 @@ test('switching extension IDs waits for the new extension and ignores the old ca
 test('extension goals refresh only after an account save is confirmed',async()=>{
  localStorage.setItem('mighty-extension-id','a'.repeat(32));let syncs=0;const cloud=deferred();
  s.extensionSync=async()=>{syncs++;};s.saveAccountGoal=()=>cloud.promise;
- await boot();await openGoal();await input(document.querySelector('textarea'),'Updated account goal');
+ await boot();await openGoal();await input(document.querySelector('.goal-detail-form textarea'),'Updated account goal');
  assert.equal(syncs,0,'Typing is private until saved.');
  await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();});
  assert.equal(syncs,0,'An in-flight save is not confirmed.');
@@ -227,14 +227,14 @@ test('a confirmed account goal refreshes the extension even if its final local r
  s.extensionSync=async()=>{assert.equal(committed,true);syncs++;};
  s.saveAccountGoal=async(_uid,goal)=>{committed=true;return goal;};
  s.readGoalWorkspace=async key=>{if(committed)throw Error('Local reread failed');return s.goalRecords?.get(key)??null;};
- await boot();await openGoal();await input(document.querySelector('textarea'),'Confirmed account revision');
+ await boot();await openGoal();await input(document.querySelector('.goal-detail-form textarea'),'Confirmed account revision');
  await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();await tick();});
  assert.equal(committed,true);assert.equal(syncs,1);assert.match(text(),/Local reread failed/);
 });
 test('a slow extension refresh does not hold a confirmed goal save open',async()=>{
  localStorage.setItem('mighty-extension-id','a'.repeat(32));const refresh=deferred();let started=false;
  s.extensionSync=()=>{started=true;return refresh.promise;};
- await boot();await openGoal();await input(document.querySelector('textarea'),'Saved while the extension reconnects');
+ await boot();await openGoal();await input(document.querySelector('.goal-detail-form textarea'),'Saved while the extension reconnects');
  try{
   await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();await tick();});
   assert.equal(started,true);assert.match(text(),/Goal saved to your account/);assert.equal(button('Save goal').disabled,false);
@@ -280,21 +280,21 @@ test('a deliberate device-only goal save never refreshes account goals',async()=
  localStorage.setItem('mighty-extension-id','a'.repeat(32));s.uid=null;let syncs=0,writes=0;
  const local=goal(4,'Device fixture goal');s.goalRecords=new Map([['device-draft',{goals:[local],activeGoalId:local.id}]]);
  s.extensionSync=async()=>{syncs++;};s.saveAccountGoal=async()=>{writes++;throw Error('Unexpected account write');};
- await boot();await openGoal();await input(document.querySelector('textarea'),'Private device-only revision');
+ await boot();await openGoal();await input(document.querySelector('.goal-detail-form textarea'),'Private device-only revision');
  await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();await tick();});
  assert.equal(syncs,0);assert.equal(writes,0);assert.match(text(),/Goal saved on this device/);
 });
 test('a failed account goal save keeps the local edit without refreshing extension goals',async()=>{
  localStorage.setItem('mighty-extension-id','a'.repeat(32));let syncs=0;
  s.extensionSync=async()=>{syncs++;};s.saveAccountGoal=async()=>{throw Error('Account offline');};
- await boot();await openGoal();await input(document.querySelector('textarea'),'Local goal awaiting connection');
+ await boot();await openGoal();await input(document.querySelector('.goal-detail-form textarea'),'Local goal awaiting connection');
  await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();await tick();});
- assert.equal(syncs,0);assert.match(text(),/Your edit is kept on this device/);assert.equal(document.querySelector('textarea').value,'Local goal awaiting connection');
+ assert.equal(syncs,0);assert.match(text(),/Your edit is kept on this device/);assert.equal(document.querySelector('.goal-detail-form textarea').value,'Local goal awaiting connection');
 });
 test('a late goal save cannot refresh the extension for the previous account',async()=>{
  localStorage.setItem('mighty-extension-id','a'.repeat(32));let syncs=0;const cloud=deferred();
  s.extensionSync=async()=>{syncs++;};s.saveAccountGoal=()=>cloud.promise;
- await boot();await openGoal();await input(document.querySelector('textarea'),'Goal for account A');
+ await boot();await openGoal();await input(document.querySelector('.goal-detail-form textarea'),'Goal for account A');
  await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();});
  await switchAccount('user-b');const afterSwitch=syncs;
  await act(async()=>{cloud.resolve({});await tick();await tick();});
@@ -303,18 +303,18 @@ test('a late goal save cannot refresh the extension for the previous account',as
 
 test('goal typed before delayed hydration survives the server and local replies',async()=>{
  const local=deferred(),server=deferred();s.localSources=()=>local.promise;s.settings=()=>server.promise;await boot();await openGoal();
- await input(document.querySelector('textarea'),'My unsaved typed goal');
+ await input(document.querySelector('.goal-detail-form textarea'),'My unsaved typed goal');
  await act(async()=>{local.resolve({strategy:'Old local goal'});server.resolve({data:{data:{strategy:'Old server goal'}},error:null});await tick();});
- assert.equal(document.querySelector('textarea').value,'My unsaved typed goal');assert.equal(s.localWrites.length,0,'Structured goal typing never rewrites imported sources.');
- await input(document.querySelector('textarea'),'');assert.equal(document.querySelector('textarea').value,'');assert.equal(s.localWrites.length,0);
+ assert.equal(document.querySelector('.goal-detail-form textarea').value,'My unsaved typed goal');assert.equal(s.localWrites.length,0,'Structured goal typing never rewrites imported sources.');
+ await input(document.querySelector('.goal-detail-form textarea'),'');assert.equal(document.querySelector('.goal-detail-form textarea').value,'');assert.equal(s.localWrites.length,0);
 });
 
 test('account switch hides old sources, people and the old account goal',async()=>{
  s.localSources=async key=>key==='user-a'?{archive:archive(),strategy:'Private A goal'}:{strategy:'Private B goal'};
  s.readRelationships=async uid=>({people:[person(uid,uid==='user-a'?'Private A Person':'Private B Person')],events:[]});await boot();assert.match(text(),/Private A Person/);
- await openGoal();await input(document.querySelector('textarea'),'A draft before switch');await switchAccount('user-b');
- assert.doesNotMatch(text(),/Private A Person|Fixture Owner|A draft before switch/);assert.match(text(),/Private B Person/);await openGoal();assert.equal(document.querySelector('textarea').value,'Private B goal');
- await switchAccount('user-a');await openGoal();assert.equal(document.querySelector('textarea').value,'A draft before switch');
+ await openGoal();await input(document.querySelector('.goal-detail-form textarea'),'A draft before switch');await switchAccount('user-b');
+ assert.doesNotMatch(text(),/Private A Person|Fixture Owner|A draft before switch/);assert.match(text(),/Private B Person/);await openGoal();assert.equal(document.querySelector('.goal-detail-form textarea').value,'Private B goal');
+ await switchAccount('user-a');await openGoal();assert.equal(document.querySelector('.goal-detail-form textarea').value,'A draft before switch');
 });
 
 test('an archive completed after account switching remains pinned to its original local account',async()=>{
@@ -406,10 +406,10 @@ test('an explicitly copied device goal is saved with its sources only after Save
 
 test('clearing an outcome preserves the existing goal until a valid edit or explicit pause is saved',async()=>{
  s.settings=async()=>({data:{data:{strategy:'Existing saved goal'}},error:null});
- await boot();await openGoal();await input(document.querySelector('textarea'),'');
+ await boot();await openGoal();await input(document.querySelector('.goal-detail-form textarea'),'');
  const form=document.querySelector('.goal-detail-form');await act(async()=>{props(form).onSubmit({preventDefault(){}});await tick();});
  assert.match(text(),/Add a name and the outcome/);assert.equal(s.goalRecords.get('user-a').goals[0].outcome,'Existing saved goal');
- assert.equal(document.querySelector('textarea').value,'');assert.equal(s.localWrites.length,0);
+ assert.equal(document.querySelector('.goal-detail-form textarea').value,'');assert.equal(s.localWrites.length,0);
 });
 
 test('newer structured goal typing survives a deferred legacy handoff and source saving',async()=>{
@@ -425,12 +425,12 @@ test('newer structured goal typing survives a deferred legacy handoff and source
  s.saveSettings=async(patch,uid)=>writes.push({patch,uid});
  await boot();await click('Me');await click("Things you've learned");await click('Review device files');await click('Use selected files');
  assert.ok(copiedPreview);await click('Goal');
- await input(document.querySelector('textarea'),'Newer goal typed while the handoff finishes');
+ await input(document.querySelector('.goal-detail-form textarea'),'Newer goal typed while the handoff finishes');
  assert.equal(s.localWrites.length,0,'Typing must not write the source record.');
  await act(async()=>{completion.resolve({destinationUid:copiedPreview.destinationUid,fields:copiedPreview.fields,fingerprint:copiedPreview.fingerprint,snapshot:device});await tick();});
- await click('Goal');assert.equal(document.querySelector('textarea').value,'Newer goal typed while the handoff finishes');
+ await click('Goal');assert.equal(document.querySelector('.goal-detail-form textarea').value,'Newer goal typed while the handoff finishes');
  assert.equal(writes.length,0);
  await click("Things you've learned");await click('Save to account');
  assert.deepEqual(writes,[{patch:{strategy:'Older goal from device copy'},uid:'user-a'}]);
- await click('Goal');assert.equal(document.querySelector('textarea').value,'Newer goal typed while the handoff finishes');
+ await click('Goal');assert.equal(document.querySelector('.goal-detail-form textarea').value,'Newer goal typed while the handoff finishes');
 });

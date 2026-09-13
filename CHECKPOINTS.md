@@ -10,11 +10,19 @@ Mighty supports intentional professional networking: choose a goal, inspect the 
 - Team: Ritesh Mohan Srivastava and Jayati Kambhampati.
 - This document records progress and a demo agenda. Updating it sends no submission or email.
 
+## Goal conversation and profile navigation: September 13 afternoon
+
+The Goals page now offers an AI conversation above the manual editor. It asks focused follow-ups through the enabled, metered Ask slot, validates a compact JSON proposal, and requires Review, Use these details, then the existing Save goal action. Answers persist by account and goal; late responses cannot overwrite edits or cross account boundaries. Exact owner-sourced quotes ground new criteria, individual investor check size stays separate from the total round, unknowns remain questions, and explicit role inflections are normalized for matching. No file or network archive accompanies the request.
+
+19 goal-coach domain checks, 141 UI checks and 189 extension checks pass. Three live requests in one fictional career interview returned a contextual follow-up and two valid reviewable proposals, including the final singular contact-role normalization; no goal was saved. Automatic approval review refused the attempted private-goal test before dispatch, so only fictional inputs were used for live model acceptance. This establishes a bounded interview/proposal path, not every goal's recommendation quality or a measured price per user.
+
+Native Chrome 0.3.4 followed a LinkedIn profile link without a page refresh, showed the new person's name/photo in exactly one top-right panel, and updated to Possible fit when that person's Experience section rendered. Source version 0.3.5 also refuses old-person section evidence while the new header hydrates. Eight regression cases cover this source-attribution guard, alongside the navigation observer tests. The installed Documents/mighty-extension folder contains 0.3.5; its final native acceptance requires Chrome Reload. Toolbar connection-only behavior and the earlier Save-to-app acceptance remain as recorded below.
+
 ## Private login ID and password
 
 Private accounts now support direct login ID/password sign-in alongside existing email links. Login IDs use reserved internal identifiers and do not receive email or recovery links. No signup is added, passwords are never placed in application storage, and generic failure copy avoids revealing account state. Five new password-domain checks, all 126 UI checks, strict TypeScript and production packaging pass.
 
-Jayati's account creation is pending explicit confirmation of its internal identifier after automatic approval review rejected the create action. No account was created, no credential was sent, and no successful live password login is claimed yet.
+A targeted live check confirmed exactly two Auth accounts. Jayati's current MIT account was missing public.users, settings and AI-limit records, explaining successful login followed by the active-account goal-save refusal. After explicit approval, a transaction pinned to that exact Auth ID and email created her active workspace, settings and standard limits. The result verified active status, settings present, 20 Assists/day, 40 total calls/day, a $5 monthly ceiling and standard tier. Existing rows were not overwritten and her password was not changed. The earlier temporary internal-identifier login is no longer present. Jayati can retry her preserved goal; a successful save from her device remains to be confirmed.
 
 ## Final reader and role repair: 0.3.3
 
@@ -63,7 +71,7 @@ Gemini 3.1 Flash-Lite completed two synthetic smoke tests successfully. Earlier 
 | Profile briefing | HTTP 200; validated small synthetic summary | 165 / 161 | 1.577 seconds | $0.00028275 |
 | Combined | Both reservations completed, neither pending | | | $0.00033750 |
 
-The approved classification, profile-briefing, Ask and search-keyword slots use Gemini 3.1 Flash-Lite. Ask and search have not had separate paid acceptance calls. These checks establish narrow compatibility and usage accounting, not monthly cost per user, general answer quality or provider-invoice reconciliation. Optional Astra drafting remains disabled and unverified. Source: work/product-plan/build-log.json.
+The approved classification, profile-briefing, Ask and search-keyword slots use Gemini 3.1 Flash-Lite. The goal conversation now exercises the Ask slot with a fictional interview; general network-answering and web search still need separate paid acceptance. These checks establish narrow compatibility and usage accounting, not monthly cost per user, general answer quality or provider-invoice reconciliation. Optional Astra drafting remains disabled and unverified. Source: work/product-plan/build-log.json.
 
 ### Business evidence
 
