@@ -53,14 +53,20 @@ export interface RankedGoalCandidate extends CandidateAssessment {
   readonly person: CandidateInput;
 }
 
+/** Preserve reviewed dotted titles before tokenization or sentence splitting.
+ * The original claim and its source text remain unchanged. */
+function roleAbbreviations(value: string): string {
+  return value.replace(/\b(?:S\.V\.P\.?|E\.V\.P\.?|V\.P\.?|C\.A\.I\.O\.?)(?=$|[\s,;:!?/()&-])/gi, title => title.replace(/\./g, ''));
+}
 export function phraseTokens(value: string): string[] {
-  return value.normalize('NFKC').toLocaleLowerCase('en-US').replace(/&amp;/g, '&').replace(/&/g, ' and ')
+  return roleAbbreviations(value.normalize('NFKC')).toLocaleLowerCase('en-US').replace(/&amp;/g, '&').replace(/&/g, ' and ')
     .match(/[\p{L}\p{N}]+/gu) ?? [];
 }
 const normalized = (value: string) => phraseTokens(value).join(' ');
 const ALIASES: readonly (readonly string[])[] = [
   ['ceo', 'chief executive officer'], ['cfo', 'chief financial officer'], ['coo', 'chief operating officer'],
   ['cto', 'chief technology officer'], ['cmo', 'chief marketing officer'], ['chro', 'chief human resources officer'],
+  ['caio', 'chief ai officer', 'chief artificial intelligence officer'],
   ['vp', 'vice president'], ['svp', 'senior vice president'], ['evp', 'executive vice president'],
   ['fmcg', 'fast moving consumer goods'], ['cpg', 'consumer packaged goods'],
   ['uk', 'united kingdom'], ['usa', 'united states', 'united states of america'], ['nyc', 'new york city'],
@@ -98,12 +104,12 @@ function findPhrase(value: string, term: string): {negative: boolean}[] {
   return result;
 }
 const sourceIsFactual = (claim: EvidenceClaim) => !['knowledge', 'writing', 'web'].includes(claim.sourceKind) && !claim.derivedFrom?.length;
-const executiveTerms = ['ceo', 'cfo', 'coo', 'cto', 'cmo', 'chro', 'president', 'founder', 'managing director', 'general manager'];
+const executiveTerms = ['ceo', 'cfo', 'coo', 'cto', 'cmo', 'chro', 'caio', 'vp', 'svp', 'evp', 'president', 'founder', 'managing director', 'general manager'];
 const executiveAliases = new Set(executiveTerms.flatMap(alternatives));
 const isExecutiveTerm = (term: string) => executiveAliases.has(alternatives(term)[0]);
 function auxiliaryExecutiveRole(value: string, term: string): boolean {
   if (!isExecutiveTerm(term)) return false;
-  return /(?:assistant|advisor|adviser|chief of staff|office|reporting|reports) (?:to|of|for) (?:the )?(?:ceo|cfo|coo|cto|cmo|chro|chief |president|founder)/.test(cachedTokens(value).join(' '));
+  return /(?:^| )(?:assistants?|advisors?|advisers?|chief of staff|office|reporting|reports)(?: directly)?(?: (?:to|of|for))? (?:the )?(?:(?:senior|executive) )?(?:ceo|cfo|coo|cto|cmo|chro|caio|vp|svp|evp|vice president|chief|president|founder|managing director|general manager)(?: |$)/.test(cachedTokens(value).join(' '));
 }
 function evaluateCriterion(criterion: GoalCriterion, claims: readonly EvidenceClaim[]): CriterionAssessment {
   const supported = new Set<string>(), contradicted = new Set<string>(), matched = new Set<string>();
@@ -115,7 +121,7 @@ function evaluateCriterion(criterion: GoalCriterion, claims: readonly EvidenceCl
     for (const term of terms) {
       if (criterion.field === 'role' && auxiliaryExecutiveRole(item.text, term)) continue;
       for (const alias of alternatives(term)) {
-        for (const clause of item.text.split(/[.!?;\n]/u)) {
+        for (const clause of roleAbbreviations(item.text).split(/[.!?;\n]/u)) {
           const occurrences = findPhrase(clause, alias);
           if (!occurrences.length) continue;
           matched.add(term);
@@ -171,7 +177,7 @@ function assess(goal: Goal, candidate: CandidateEvidence, options: AssessmentOpt
     const executives = roles.filter(item => executiveTerms.some(term => !auxiliaryExecutiveRole(item.text, term)
       && alternatives(term).some(alias => findPhrase(item.text, alias).some(match => !match.negative))));
     if (executives.length) routes.push({kind: 'executive_hiring', label: 'Executive contact route',
-      reason: 'A recorded executive role offers a possible hiring contact route; hiring authority and openings remain unconfirmed.', claimIds: executives.map(item => item.id)});
+      reason: 'A recorded executive role offers a possible career contact route; hiring authority and openings remain unconfirmed.', claimIds: executives.map(item => item.id)});
     const recruiters = roles.filter(item => ['recruiter', 'recruiting', 'executive search', 'talent acquisition', 'headhunter']
       .some(term => findPhrase(item.text, term).some(match => !match.negative)));
     if (recruiters.length) routes.push({kind: 'recruiter', label: 'Recruiter route',

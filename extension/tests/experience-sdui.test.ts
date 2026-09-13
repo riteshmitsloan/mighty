@@ -23,6 +23,10 @@ const fields = (role = 'Chief Technology Officer', employer = 'Example Systems �
   `<p>${role}</p><p>${employer}</p><p>${date}</p>${location ? `<p>${location}</p>` : ''}`;
 const entry = (paragraphs = fields(), extra = '<p>Description outside the company anchor. RAW_END</p>', href = company) =>
   `<div componentkey="entity-collection-item-synthetic"><a href="${href}"><figure><img alt="Example Systems logo"></figure></a><a href="${href}"><div>${paragraphs}</div></a>${extra}</div>`;
+const unlinkedEntry = (role = 'V.P. Research', employer = 'Example Transport Group', date = 'Jan 2021 - Present · 5 yrs 9 mos', logo = employer + ' logo', location = '') =>
+  `<div componentkey="entity-collection-item-unlinked"><div><figure><svg role="img" aria-label="${logo}"></svg></figure><div>
+  <div><div><p>${role}</p><p>${employer}</p></div></div><p>${date}</p>${location ? '<p>' + location + '</p>' : ''}
+  </div></div></div>`;
 const section = (entries = entry(), slug = 'synthetic-person') => `<section id="synthetic-experience"><h2 componentkey="ProfileNullStateCardAnchor_Experience">Experience</h2><div componentkey="Profile_Top_Level_ExperienceTopLevelSection${slug}">${entries}</div></section>`;
 // Observed SDUI hierarchy: an empty identity marker and the content wrapper are siblings.
 const siblingSection = (entries = entry(), slug = 'synthetic-person') => `<section id="synthetic-experience"><div>
@@ -32,6 +36,41 @@ const siblingSection = (entries = entry(), slug = 'synthetic-person') => `<secti
 const page = (experience = section(), extra = '') => parseHTML(`<main><section aria-label="Primary content">${card}${about}${experience}</section>${extra}</main>`).document as Document;
 const read = (experience = section(), extra = '') => readProfile(page(experience, extra), url, at)!;
 const typed = (profile: Profile) => profile.anchors.filter(anchor => anchor.field !== undefined);
+
+test('the observed unlinked employer uses its matching logo label and dated title block as evidence', () => {
+  const document = page(siblingSection(unlinkedEntry()));
+  assert.equal(document.querySelector('[componentkey="entity-collection-item-unlinked"]')!.querySelectorAll('a').length, 0);
+  const profile = readProfile(document, url, at)!;
+  assert.deepEqual(typed(profile).map(anchor => [anchor.field, anchor.text]), [['role', 'V.P. Research'], ['company', 'Example Transport Group']]);
+  for (const anchor of typed(profile)) assert.equal(validCurrentExperienceAnchor(anchor, profile.anchors, url, at), true);
+  const payload = inboxPayload(validateSave({operationId, userId: uid, profile, source: 'rendered_profile'}, session));
+  assert.deepEqual(payload.snapshot.anchors, profile.anchors);
+  assert.ok(profile.anchors.some(anchor => anchor.field === undefined && anchor.text.includes('V.P. Research Example Transport Group Jan 2021 - Present')));
+  const withLocation = read(siblingSection(unlinkedEntry(undefined, undefined, undefined, undefined, 'Example City')));
+  assert.equal(typed(withLocation).length, 2);
+  assert.ok(!renderedCandidate(withLocation).claims.some(claim => claim.field === 'location'));
+});
+
+test('unlinked jobs refuse absent, hidden, mismatched, duplicate or generic logo evidence', () => {
+  const fixtures = [unlinkedEntry(undefined, undefined, undefined, 'Another Employer logo'), unlinkedEntry(undefined, undefined, undefined, 'Company logo'),
+    unlinkedEntry().replace('<svg role="img"', '<svg hidden role="img"'), unlinkedEntry().replace('role="img"', 'role="presentation"'),
+    unlinkedEntry().replace('<figure>', '<figure hidden>'), unlinkedEntry().replace('</figure>', '</figure><figure><svg role="img" aria-label="Example Transport Group logo"></svg></figure>'),
+    unlinkedEntry().replace('</svg>', '</svg><svg role="img" aria-label="Example Transport Group logo"></svg>')];
+  for (const html of fixtures) assert.equal(typed(read(siblingSection(html))).length, 0);
+});
+
+test('unlinked descriptions, grouped entries, foreign markers and noncurrent dates never supply a current role', () => {
+  const fixtures = [
+    `<div componentkey="entity-collection-item-unlinked"><figure><svg role="img" aria-label="Example Transport Group logo"></svg></figure>${fields('V.P. Research', 'Example Transport Group', 'Jan 2021 - Present')}</div>`,
+    unlinkedEntry().replace('<p>Jan 2021', '<div><p>Jan 2021').replace('5 yrs 9 mos</p>', '5 yrs 9 mos</p></div>'),
+    unlinkedEntry().replace('</figure>', '</figure><p>A paragraph describing a colleague.</p>'),
+    unlinkedEntry().replace('</figure>', '</figure><div componentkey="entity-collection-item-nested">Another job</div>'),
+    unlinkedEntry(undefined, undefined, 'Jan 2021 - Jan 2025 · 4 yrs'), unlinkedEntry(undefined, undefined, 'Oct 2026 - Present'),
+    unlinkedEntry().replace('</figure>', '</figure><a href="https://example.org">Unrelated link</a>'),
+  ];
+  for (const html of fixtures) assert.equal(typed(read(siblingSection(html))).length, 0);
+  assert.equal(typed(read(siblingSection(unlinkedEntry(), 'another-person'))).length, 0);
+});
 
 test('an empty SDUI identity marker binds sibling current entries inside the exact same section', () => {
   const document = page(siblingSection(entry(fields('Founding Partner (Region)', 'Example Ventures · Full-time', 'Jan 2024 - Present · 2 yrs 8 mos'))));

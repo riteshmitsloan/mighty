@@ -17,10 +17,55 @@ test('phrase boundaries avoid accidental substrings and different fundraising st
 test('role aliases match explicit evidence, while CEO assistants and vice presidents are not CEOs', () => {
   const g = goal([criterion({terms: ['CEO']})]);
   assert.equal(assessCandidate(g, {name: 'Sam', role: 'Chief Executive Officer'}).criteria[0].status, 'supported');
-  for (const role of ['Executive Assistant to the CEO', 'Chief of Staff to the CEO', 'Vice President of Finance', 'Not a CEO']) {
+  for (const role of ['Executive Assistant to the CEO', 'Chief of Staff to the CEO', 'Not a CEO']) {
     const result = assessCandidate(g, {name: 'Sam', role});
     assert.equal(result.criteria[0].status === 'supported', false); assert.equal(result.contactRoutes.some(c => c.kind === 'executive_hiring'), false);
   }
+  const vp = assessCandidate(g, {name: 'Sam', role: 'Vice President of Finance'});
+  assert.equal(vp.criteria[0].status, 'unknown'); assert.deepEqual(vp.contactRoutes.map(route => route.kind), ['executive_hiring']);
+});
+test('VP leadership titles offer career contact routes without establishing a job or fundraising relevance', () => {
+  const career = goal([criterion({terms: ['Chief AI Officer'], appliesTo: 'opportunity'})]);
+  for (const role of ['Vice President of Research', 'VP R&D', 'V.P. R&D', 'SVP Engineering', 'S.V.P. Engineering', 'Senior Vice President', 'EVP Operations', 'E.V.P. Operations', 'Executive Vice President']) {
+    const candidate = buildCandidateEvidence({name: 'Synthetic leader', role});
+    const result = assessCandidate(career, candidate);
+    assert.equal(result.status, 'possible_route', role); assert.equal(result.criteria[0].status, 'unknown', role);
+    assert.deepEqual(result.contactRoutes.map(route => route.kind), ['executive_hiring'], role);
+    assert.match(result.contactRoutes[0].reason, /hiring authority and openings remain unconfirmed/);
+    assert.equal(candidate.claims.find(claim => claim.field === 'role')?.text, role);
+    const fundraising = assessCandidate({...career, kind: 'fundraising'}, candidate);
+    assert.equal(fundraising.status, 'unknown', role); assert.deepEqual(fundraising.contactRoutes, [], role);
+  }
+});
+test('dotted leadership titles support only matching contact criteria and preserve negation', () => {
+  for (const [term, role] of [['Vice President', 'V.P. R&D'], ['V.P.', 'Vice President'], ['Senior Vice President', 'S.V.P.'], ['EVP', 'E.V.P.']]) {
+    const g = goal([criterion({terms: [term]})]);
+    assert.equal(assessCandidate(g, {role}).criteria[0].status, 'supported', role);
+    const negative = assessCandidate(g, {role: 'Not a ' + role});
+    assert.equal(negative.criteria[0].status, 'contradicted', role); assert.deepEqual(negative.contactRoutes, [], role);
+  }
+});
+test('assistants, advisors and people reporting to VP or CAIO do not inherit the executive or peer role', () => {
+  const g = goal([criterion({terms: ['VP', 'SVP', 'EVP', 'CAIO']})]);
+  for (const role of ['Assistant to the VP', 'Executive Assistant to V.P.', 'Advisor to the Vice President', 'Adviser for the SVP', 'Reports directly to the EVP', 'Reporting to Senior Vice President', 'Assistant Vice President', 'Chief of Staff to the Chief AI Officer', 'Advisor to CAIO', 'Not a Vice President', 'Never an EVP', 'No longer a V.P.']) {
+    const result = assessCandidate(g, {role});
+    assert.notEqual(result.criteria[0].status, 'supported', role); assert.deepEqual(result.contactRoutes, [], role);
+  }
+  const denied = claim({field: 'role', text: 'VP', polarity: 'negative'});
+  assert.deepEqual(assessCandidate(g, {claims: [denied]}).contactRoutes, []);
+});
+test('CAIO and Chief AI Officer identify the same peer context while keeping opportunity evidence separate', () => {
+  for (const [term, role] of [['Chief AI Officer', 'CAIO'], ['CAIO', 'Chief AI Officer'], ['Chief Artificial Intelligence Officer', 'C.A.I.O.']]) {
+    const contactGoal = goal([criterion({terms: [term]})]);
+    const result = assessCandidate(contactGoal, {role});
+    assert.equal(result.criteria[0].status, 'supported', role);
+    assert.deepEqual(result.contactRoutes.map(route => route.kind), ['peer', 'executive_hiring']);
+    const opportunity = assessCandidate(goal([criterion({terms: [term], appliesTo: 'opportunity'})]), {role});
+    assert.equal(opportunity.criteria[0].status, 'unknown');
+    assert.match(opportunity.contactRoutes[0].reason, /not evidence of a vacancy/);
+  }
+  const headline = assessCandidate(goal([criterion({terms: ['CAIO']})]), {anchors: [{kind: 'headline', text: 'CAIO | V.P. Innovation'}]});
+  assert.deepEqual(headline.contactRoutes, []); assert.equal(headline.criteria[0].status, 'unknown');
 });
 test('aspirational headlines do not create executive or peer routes, while an explicit rendered role does', () => {
   const g = goal([criterion({terms: ['CEO']})]);

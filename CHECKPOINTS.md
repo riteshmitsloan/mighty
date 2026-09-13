@@ -10,6 +10,12 @@ Mighty supports intentional professional networking: choose a goal, inspect the 
 - Team: Ritesh Mohan Srivastava and Jayati Kambhampati.
 - This document records progress and a demo agenda. Updating it sends no submission or email.
 
+## Final reader and role repair: 0.3.3
+
+The second observed layout has no employer link. Its current role and company are recognized only when the rendered company-logo label, job-entry hierarchy and valid current date agree. VP/Vice President, dotted V.P., SVP/EVP and CAIO aliases now establish possible career contact routes while preserving unknown openings, negative role statements and assistant/advisor exclusions. No fundraising mandate is inferred from a job title.
+
+415 release core, 120 UI and 177 extension checks pass. The 24 unrelated uncommitted Tavily checks are excluded. The native connected top-right panel, photo and Save-to-app acceptance below passed on 0.3.1. Final 0.3.3 typed-reader acceptance awaits Reload and is not inferred from those older checks.
+
 ## Native extension follow-up: 0.3.2
 
 Native Chrome confirmed one connected top-right panel with the bundled font, profile photo and independent goal switching. A real Save reached the owner's Relationships list and survived reload; the photo, profile-read status and rendered profile context were visible in the main app. No LinkedIn invitation or message was sent.

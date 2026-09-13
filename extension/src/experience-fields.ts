@@ -36,7 +36,23 @@ function companyURL(value: string): string | null {
     return match ? 'https://www.linkedin.com/company/' + match[1] + '/' : null;
   } catch {return null;}
 }
-/** Only the observed, dated company-link layout establishes the semantics of these paragraphs. */
+/** An unlinked employer needs an independent logo label and the observed job-block hierarchy. */
+function unlinkedJobParagraphs(item: Element): {paragraphs: Element[]; logoLabel: string} | null {
+  if (item.querySelector('a')) return null;
+  const figures = visible(item, 'figure'), paragraphs = visible(item, 'p');
+  if (figures.length !== 1 || paragraphs.length < 3 || paragraphs.length > 4) return null;
+  const figure = figures[0], logos = visible(figure, 'svg[role="img"][aria-label]');
+  if (logos.length !== 1 || paragraphs.some(p => visible(p, 'p').length || figure.contains(p))) return null;
+  const siblings = Array.from(figure.parentElement?.children || []).filter(node => node.matches('div') && rendered(node)
+    && paragraphs.every(p => node.contains(p)));
+  if (siblings.length !== 1) return null;
+  const container = siblings[0], [role, employer, date, location] = paragraphs, titles = role.parentElement;
+  if (!titles?.matches('div') || titles === container || titles !== employer.parentElement || titles.contains(date)
+    || !date.parentElement?.matches('div') || !date.parentElement.contains(titles)
+    || (location && location.parentElement !== date.parentElement)) return null;
+  return {paragraphs, logoLabel: (logos[0].getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim()};
+}
+/** Only an observed, dated employer layout establishes the semantics of these paragraphs. */
 function sduiCurrentFields(item: Element, observedAt: string, profileUrl: string): CurrentExperienceField[] {
   const section = item.closest('section');
   if (!section || !sduiExperienceEntries(section, profileUrl).includes(item) || visible(item, entitySelector + ',li,[itemscope]').length) return [];
@@ -46,11 +62,18 @@ function sduiCurrentFields(item: Element, observedAt: string, profileUrl: string
   if (ranges.length !== 1 || !validCurrentExperienceDate(ranges[0], observedAt)) return [];
   const dateRange = ranges[0], links = visible(item, 'a[href]');
   const textLinks = links.filter(link => visible(link, 'p').length);
-  if (textLinks.length !== 1) return [];
-  const link = textLinks[0], employerUrl = companyURL(link.getAttribute('href') || '');
-  if (!employerUrl || links.some(other => /\/company\//.test(other.getAttribute('href') || '') && companyURL(other.getAttribute('href') || '') !== employerUrl)) return [];
-  const paragraphs = visible(link, 'p');
-  if (paragraphs.length < 3 || paragraphs.length > 4 || paragraphs.some(p => p.closest('a') !== link || visible(p, 'p').length)) return [];
+  let paragraphs: Element[], logoLabel: string | null = null;
+  if (!item.querySelector('a')) {
+    const unlinked = unlinkedJobParagraphs(item);
+    if (!unlinked) return [];
+    paragraphs = unlinked.paragraphs; logoLabel = unlinked.logoLabel;
+  } else {
+    if (textLinks.length !== 1) return [];
+    const link = textLinks[0], employerUrl = companyURL(link.getAttribute('href') || '');
+    if (!employerUrl || links.some(other => /\/company\//.test(other.getAttribute('href') || '') && companyURL(other.getAttribute('href') || '') !== employerUrl)) return [];
+    paragraphs = visible(link, 'p');
+    if (paragraphs.length < 3 || paragraphs.length > 4 || paragraphs.some(p => p.closest('a') !== link || visible(p, 'p').length)) return [];
+  }
   const [role, employer, renderedDate] = paragraphs.map(p => textOf(p, Infinity));
   if (!renderedDate.startsWith(dateRange)) return [];
   const suffix = renderedDate.slice(dateRange.length).trim();
@@ -59,6 +82,7 @@ function sduiCurrentFields(item: Element, observedAt: string, profileUrl: string
   const employerParts = employer.split(/\s+[·•]\s+/);
   if (employerParts.length > 2 || (employerParts.length === 2 && !/^(?:Full-time|Part-time|Self-employed|Freelance|Contract|Internship|Apprenticeship|Seasonal|Co-op)$/i.test(employerParts[1]))) return [];
   const company = employerParts[0];
+  if (logoLabel !== null && logoLabel !== company + ' logo') return [];
   if ([role, company].some(value => !value.trim() || value.length > CURRENT_EXPERIENCE_LIMITS.field || currentExperienceDateRanges(value).length)) return [];
   return (['role','company'] as const).map(field => ({field, text: field === 'role' ? role : company, currentExperience: {dateRange, entryText}}));
 }
