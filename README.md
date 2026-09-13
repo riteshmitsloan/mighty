@@ -34,6 +34,12 @@ AI synthesis references original evidence and cannot update it. Search snippets 
 
 See [CHECKPOINTS.md](CHECKPOINTS.md) for the submission context, demo story, and verified versus pending acceptance checks. Credentials, personal files, and generated test output are excluded from source control.
 
+## Living product plan
+
+The [product plan and build record](https://riteshmitsloan.github.io/mighty/) is published from `main` and `/docs` on GitHub Pages. It records implemented features, verification results, remaining work, algorithms, pricing assumptions and the approved brand book. Local review notes stay in the viewer's browser.
+
+The editable plan remains in the local `work/product-plan` directory. On that workspace, a successful production build regenerates the plan and `scripts/publish-product-plan.mjs` prepares the public snapshot with an explicit list of brand assets. It checks document links, fragments and CSS font references before publication. Commit the refreshed `docs/` snapshot and push `main` to update the website. A checkout without the local plan source retains the published snapshot and still builds the app normally.
+
 ## Design and content
 
 The approved warm Mighty concepts are implemented with a bundled Schibsted Grotesk font. See [CONTENT-REVIEW.md](CONTENT-REVIEW.md) for the critique, condensed wording, and remaining product choices.

@@ -5,6 +5,8 @@ import type {GatewayCall} from '../lib/platform';
 import type {EvidenceClaim} from '../lib/evidence';
 import {buildSavedPersonEvidence} from '../lib/person-evidence';
 import {assessCandidate} from '../lib/assessment';
+import {companyOverlapFor, type CompanyOverlap} from '../lib/company-evidence';
+import {verifiedCompanyOverlap} from '../lib/discover';
 import {listRelationshipContext, saveCandidateObservation, normalizeCandidateObservation, observationsToClaims, type CandidateObservationInput, type MessageDraft} from '../lib/relationship-context';
 import ConversationPanel from './ConversationPanel';
 import './PersonEvidencePanel.css';
@@ -16,6 +18,7 @@ const defaultContextStore: ContextStore = {read: listRelationshipContext, save: 
 export interface PersonEvidencePanelProps {
   uid: string | null; person: Person; goals: readonly Goal[]; activeGoal: Goal | null;
   selfEvidence: readonly EvidenceClaim[]; call: GatewayCall; onRemaining: (remaining: number) => void;
+  companyIndex?: Readonly<Record<string, CompanyOverlap>>;
   onRecorded: () => Promise<void>; contextStore?: ContextStore;
 }
 const fields: CandidateObservationInput['field'][] = ['role', 'company', 'industry', 'location', 'stage', 'check_size', 'education', 'skill', 'context', 'custom', 'name', 'email', 'url'];
@@ -26,7 +29,7 @@ const goalLabel = (id: string | null, goals: readonly Goal[]) => id ? `Goal: ${g
 export default function PersonEvidencePanel(props: PersonEvidencePanelProps) {
   return <PersonEvidenceEditor key={JSON.stringify([props.uid, props.person.id])} {...props}/>;
 }
-function PersonEvidenceEditor({uid, person, goals, activeGoal, selfEvidence, call, onRemaining, onRecorded, contextStore = defaultContextStore}: PersonEvidencePanelProps) {
+function PersonEvidenceEditor({uid, person, goals, activeGoal, selfEvidence, companyIndex, call, onRemaining, onRecorded, contextStore = defaultContextStore}: PersonEvidencePanelProps) {
   const [observations, setObservations] = useState<Observation[]>([]), [error, setError] = useState(''), [saving, setSaving] = useState(false), [editing, setEditing] = useState(false);
   const [savedDrafts,setSavedDrafts]=useState<MessageDraft[]>([]);
   const [field, setField] = useState<CandidateObservationInput['field']>('role'), [body, setBody] = useState('');
@@ -52,7 +55,14 @@ function PersonEvidenceEditor({uid, person, goals, activeGoal, selfEvidence, cal
     const replaced = new Set(observations.map(item => item.supersedesId).filter(Boolean));
     return observations.filter(item => !replaced.has(item.id));
   }, [observations]);
-  const baseCandidate = useMemo(() => buildSavedPersonEvidence(person), [person]);
+  const baseCandidate = useMemo(() => {
+    const candidate = buildSavedPersonEvidence(person);
+    const fact = companyIndex && typeof companyIndex === 'object' && !Array.isArray(companyIndex)
+      ? companyOverlapFor(companyIndex, candidate.company) : null;
+    const overlap = verifiedCompanyOverlap(candidate.company, fact);
+    // Derive from the current workspace's import; saved notes never become a count source.
+    return {...candidate, companyOverlap: overlap ? {...overlap} : null};
+  }, [person, companyIndex]);
   const candidateForGoal = (goalId: string | null) => ({...baseCandidate, claims: [...baseCandidate.claims, ...observationsToClaims(observations, person.id, goalId)]});
   const candidate = useMemo(() => candidateForGoal(activeGoal?.id ?? null), [baseCandidate, observations, person.id, activeGoal?.id]);
   const assessments = useMemo(() => goals.filter(goal => goal.status === 'active').map(goal => {
@@ -99,6 +109,7 @@ function PersonEvidenceEditor({uid, person, goals, activeGoal, selfEvidence, cal
       })}</div>)}{result.unknowns.map(unknown => <p className="muted small" key={unknown}>{unknown}</p>)}</details></article>)}</div>}
     </section>
     <section className="panel content-panel"><div className="section-heading"><div><p className="eyebrow">Person context</p><h2>What you know</h2></div><button type="button" className="button secondary" onClick={() => begin()} disabled={saving || editing}>Add a fact</button></div><p className="muted small">Use a detail you know, an authorized export, or a source you can cite. Corrections preserve the original record.</p>
+      {baseCandidate.companyOverlap && <p className="person-company-overlap">{baseCandidate.companyOverlap.statement}</p>}
       {currentObservations.map(observation => <article className="confirmed-fact" key={observation.id}><div><span className="eyebrow muted">{observation.appliesTo === 'opportunity' ? 'Opportunity' : 'Person'} · {fieldName(observation.field)}</span><p>{observation.text}</p><small>{goalLabel(observation.goalId, goals)}{observation.polarity === 'negative' ? ' · Explicitly ruled out' : ''}<br/>{observation.sourceLabel}</small></div><button type="button" className="text-button" onClick={() => begin(observation)} disabled={saving || editing}>Correct</button></article>)}
       {!currentObservations.length && <p>No additional facts recorded yet.</p>}
       {editing && <form className="fact-editor" onSubmit={event => {event.preventDefault(); void save();}}>

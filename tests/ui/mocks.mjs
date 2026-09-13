@@ -60,7 +60,7 @@ export const appDependencyStubs = {
       state().localWrites.push({key, patch});
     };
     export const allConnections = uid => state().allConnections(uid);
-    export const accountSources = async () => ({});
+    export const accountSources = async uid => state().accountSources ? state().accountSources(uid) : {};
     export const readRelationships = uid => state().readRelationships(uid);
     export const savePerson = (uid, input) => state().savePerson(uid, input);
     export const capture = (...args) => state().capture(...args);

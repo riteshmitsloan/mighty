@@ -1,0 +1,4 @@
+@font-face{font-family:'Mighty Schibsted Grotesk';font-style:normal;font-weight:400 900;font-display:swap;src:url('fonts/schibsted-grotesk-latin-wght-normal.woff2') format('woff2')}
+:root{--mighty-indigo:#4A3FD1;--mighty-coral:#E87A56;--mighty-overlap-white:#431E46;--mighty-ink:#1D1B26;--mighty-ivory:#FBFAF8;--mighty-mark-width:31px;--mighty-mark-height:22px;--mighty-wordmark-size:19px;--mighty-wordmark-weight:800;--mighty-wordmark-tracking:-.3px;--mighty-lockup-gap:10px}
+.mighty-logo{display:inline-flex;align-items:center;gap:var(--mighty-lockup-gap);color:var(--mighty-ink);font-family:'Mighty Schibsted Grotesk',sans-serif;font-size:var(--mighty-wordmark-size);font-weight:var(--mighty-wordmark-weight);font-synthesis:none;letter-spacing:var(--mighty-wordmark-tracking);line-height:normal;white-space:nowrap}
+.mighty-logo>img{display:block;width:var(--mighty-mark-width);height:var(--mighty-mark-height);flex:none}

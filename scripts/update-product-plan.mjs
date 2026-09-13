@@ -3,7 +3,7 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {dirname, resolve} from 'node:path';
 
-// The founder's personal plan stays local and is not part of a public checkout.
+// The editable plan stays local; an explicit publisher prepares its public snapshot.
 const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
 const plan=resolve(root,'work/product-plan');
 try{await access(resolve(plan,'build-plan.mjs'));}catch{process.exit(0);}
@@ -14,4 +14,5 @@ try{commit=execFileSync('git',['rev-parse','--short','HEAD'],{cwd:root,encoding:
 history.builds.push({at:new Date().toISOString(),commit,dirty,result:'Production app and extension packages built successfully.',acceptance:'Feature acceptance is recorded separately; a successful build verifies compilation and packaging.'});
 await writeFile(file,JSON.stringify(history,null,2)+'\n');
 execFileSync(process.execPath,[resolve(plan,'build-plan.mjs')],{cwd:root,stdio:'inherit'});
+execFileSync(process.execPath,[resolve(root,'scripts/publish-product-plan.mjs')],{cwd:root,stdio:'inherit'});
 console.log('Updated the local product plan build record.');

@@ -33,6 +33,80 @@ afterEach(async()=>{await act(async()=>root.unmount());});
 const boot=async()=>act(async()=>{root.render(React.createElement(App));await tick();await tick();});
 const openGoal=async()=>{await click('Me');await click('Goal');};
 const switchAccount=async uid=>act(async()=>{s.uid=uid;for(const f of s.authListeners)f('SIGNED_IN',uid?{user:{id:uid}}:null);await tick();await tick();});
+const openPerson=async()=>{await click('Relationships');await click(document.querySelector('.person-open'));};
+const overlapFact=(company,count)=>({company,count,statement:`You already know ${count} people at ${company}`});
+function overlapPerson(companies=['Current Fixture Company'],dateRange='2025 - Present'){
+ const profileUrl='https://www.linkedin.com/in/mighty-overlap-ui-fixture/',observedAt='2026-09-13T12:00:00.000Z';
+ const anchors=companies.flatMap(company=>{const entryText=`CFO ${company} ${dateRange}`,source={sourceUrl:profileUrl+'#experience',observedAt};return[
+  {kind:'experience',text:entryText,...source},{kind:'timing',text:dateRange,...source},
+  ...['role','company'].map(field=>({kind:'experience',field,text:field==='role'?'CFO':company,...source,currentExperience:{dateRange,entryText}})),
+ ];});
+ return {...person('overlap-fixture','Overlap Fixture',profileUrl),profile:{profileUrl,profileReadAt:observedAt,truncated:false,source:'rendered_profile',anchors}};
+}
+
+test('a saved profile uses its validated current company and preserves the imported overlap statement in goal reasons',async()=>{
+ const current=overlapFact('Current Fixture Company',3),earlier=overlapFact('Earlier Fixture Company',9);
+ const index={'current fixture company':current,'earlier fixture company':earlier};
+ const saved={...overlapPerson(),context:{source:'discovery',company:'Earlier Fixture Company',position:'CEO'}};
+ const active={...goal(9,'Overlap fixture goal'),criteria:[{id:'role',field:'role',label:'Finance leadership',terms:['CFO'],importance:'preferred',appliesTo:'contact',origin:'user'}]};
+ s.goalRecords=new Map([['user-a',{goals:[active],activeGoalId:active.id}]]);
+ s.localSources=async()=>({archive:{...archive(),companyIndex:index}});s.readRelationships=async()=>({people:[saved],events:[]});
+ const before=structuredClone(saved);await boot();await openPerson();
+ assert.equal(document.querySelector('.person-company-overlap').textContent,current.statement);
+ assert.match(document.querySelector('.person-goal-assessments').textContent,/You already know 3 people at Current Fixture Company\./);
+ assert.doesNotMatch(document.querySelector('.person-intelligence').textContent,/You already know 9 people/);
+ assert.deepEqual(saved,before,'Looking up the current count never changes the saved profile or old company.');
+ assert.deepEqual(index['current fixture company'],current);assert.equal(s.localWrites.length,0);
+});
+test('a first extension save can show account-stored overlap without an archive re-upload or active goal',async()=>{
+ const fact=overlapFact('Current Fixture Company',4),saved={...overlapPerson(),created_at:'2026-09-13T12:00:02.000Z'};
+ s.goalRecords=new Map([['user-a',{goals:[],activeGoalId:null}]]);
+ s.accountSources=async()=>({archive:{...archive(),companyIndex:{'current fixture company':fact}}});
+ s.readRelationships=async()=>({people:[saved],events:[]});
+ await boot();await openPerson();assert.equal(document.querySelector('.person-company-overlap').textContent,fact.statement);
+ assert.equal(document.querySelector('.person-goal-assessments'),null);assert.equal(s.localWrites.length,0);
+});
+test('historical or multiple current companies never pick a company for overlap',async()=>{
+ const index={'current fixture company':overlapFact('Current Fixture Company',3),'other fixture company':overlapFact('Other Fixture Company',7)};
+ let saved=overlapPerson(['Current Fixture Company'],'2020 - 2022');
+ s.localSources=async()=>({archive:{...archive(),companyIndex:index}});s.readRelationships=async()=>({people:[saved],events:[]});
+ await boot();await openPerson();assert.equal(document.querySelector('.person-company-overlap'),null);
+ saved=overlapPerson(['Current Fixture Company','Other Fixture Company']);
+ await switchAccount('user-b');await openPerson();assert.equal(document.querySelector('.person-company-overlap'),null);
+ assert.doesNotMatch(document.querySelector('.person-intelligence').textContent,/You already know/);
+});
+test('missing, inherited, mismatched or malformed overlap facts are refused without losing the profile',async()=>{
+ const company='Current Fixture Company',valid=overlapFact(company,3),key='current fixture company';
+ const indices=[undefined,{},Object.create({[key]:valid}),{[key]:overlapFact('Different Fixture Company',3)},
+  {[key]:{...valid,company:17}},{[key]:{...valid,count:3.5}},{[key]:{...valid,count:1}},{[key]:{...valid,statement:'Many important contacts'}},[]];
+ let index=indices[0];s.localSources=async()=>({archive:{...archive(),companyIndex:index}});
+ s.readRelationships=async()=>({people:[overlapPerson()],events:[]});
+ await boot();await openPerson();assert.equal(document.querySelector('.person-company-overlap'),null);
+ for(let i=1;i<indices.length;i++){
+  index=indices[i];await switchAccount('overlap-fixture-account-'+i);await openPerson();
+  assert.equal(document.querySelector('.person-company-overlap'),null);assert.match(text(),/Overlap Fixture/);
+ }
+});
+test('changing accounts clears an old matching company count before the new account sources arrive',async()=>{
+ const a=overlapFact('Current Fixture Company',3),b=overlapFact('Current Fixture Company',6),next=deferred();
+ s.accountSources=async uid=>uid==='user-a'?{archive:{...archive(),companyIndex:{'current fixture company':a}}}:next.promise;
+ s.readRelationships=async()=>({people:[overlapPerson()],events:[]});
+ await boot();await openPerson();assert.equal(document.querySelector('.person-company-overlap').textContent,a.statement);
+ await switchAccount('user-b');await openPerson();assert.equal(document.querySelector('.person-company-overlap'),null);
+ await act(async()=>{next.resolve({archive:{...archive(),companyIndex:{'current fixture company':b}}});await tick();});
+ assert.equal(document.querySelector('.person-company-overlap').textContent,b.statement);assert.doesNotMatch(document.querySelector('.person-intelligence').textContent,/You already know 3 people/);
+});
+test('a newly imported index replaces the count immediately and never borrows a stale saved statement',async()=>{
+ const old=overlapFact('Current Fixture Company',3),latest=overlapFact('Current Fixture Company',5);
+ const saved={...overlapPerson(),context:{saveReason:'You already know 99 people at Current Fixture Company'}};
+ s.localSources=async()=>({archive:{...archive(),companyIndex:{'current fixture company':old}}});
+ s.readRelationships=async()=>({people:[saved],events:[]});s.readArchive=async()=>({...archive(),companyIndex:{'current fixture company':latest}});
+ await boot();await openPerson();assert.equal(document.querySelector('.person-company-overlap').textContent,old.statement);
+ await click('Me');await click("Things you've learned");
+ await act(async()=>{props(document.querySelector('input[accept=".zip"]')).onChange({target:{files:[new Blob(['synthetic fixture'])],value:'fixture.zip'}});await tick();});
+ await openPerson();assert.equal(document.querySelector('.person-company-overlap').textContent,latest.statement);
+ assert.doesNotMatch(document.querySelector('.person-intelligence').textContent,/You already know (?:3|99) people/);
+});
 
 test('a saved person shows the newer sourced headline in the list and person header',async()=>{
  const saved=person('current-person','Synthetic Current Person','https://www.linkedin.com/in/ui-current-role/');
