@@ -7,8 +7,8 @@ export function profilePanelEligibility(doc: Document, value: string): 'other' |
   const profileUrl = canonicalProfileURL(value); if (!profileUrl) return 'unsupported';
   const top = profileTopCard(doc, value); if (!top) return 'unknown';
   // A legacy h1 can survive a client-side navigation or worker reinjection. Only
-  // the SDUI card has a subject marker verified against the current profile URL.
-  // Unbound layouts remain readable through the manual toolbar popup.
+  // the SDUI card has a subject identity verified against the current profile URL.
+  // Unbound layouts do not mount an automatic assessment panel.
   if (!top.matches('div[id^="com.linkedin.sdui.profile.card.ref"][id$="Topcard"],div[componentkey^="com.linkedin.sdui.profile.card.ref"][componentkey$="Topcard"]')) return 'unknown';
   let other = false;
   for (const control of top.querySelectorAll('button,a,[role="button"]')) {

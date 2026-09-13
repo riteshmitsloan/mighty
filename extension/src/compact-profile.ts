@@ -43,12 +43,22 @@ export function compactFit(assessment: CandidateAssessment, goal?: Goal): Compac
     return {label: 'No clear connection yet', tone: 'unknown',
       reason: `Mighty hasn't found ${focus} to this goal in the available profile. Save if you know more about them.`};
   }
-  const userCriteria = assessment.criteria.filter(row => row.origin === 'user');
-  const strong = assessment.status === 'supported' && userCriteria.length >= 2
-    && userCriteria.every(row => row.status === 'supported')
-    && userCriteria.some(row => ['role', 'industry', 'stage', 'check_size'].includes(row.field))
-    && assessment.criteria.every(row => row.status === 'supported');
-  return {label: strong ? 'Strong potential' : 'Possible fit', tone: strong ? 'strong' : 'possible', reason: strong ? reason : contactReason(assessment) || reason};
+  // A contact's relevance and proof of an available opportunity are separate.
+  // Blank saved placeholders are unanswered questions, not unmet preferences.
+  const defined = goal ? new Set(goal.criteria.filter(row => row.terms.some(term => /[\p{L}\p{N}]/u.test(term))).map(row => row.id)) : null;
+  const criteria = assessment.criteria.filter(row => !defined || defined.has(row.criterionId));
+  const contact = criteria.filter(row => row.appliesTo === 'contact');
+  const userContact = contact.filter(row => row.origin === 'user');
+  // Supporting role evidence comes from the shared field/scope validator. A
+  // provisional headline route never supports a role criterion by itself.
+  const strong = userContact.some(row => row.field === 'role' && row.status === 'supported' && row.supportingClaimIds.length > 0)
+    && userContact.every(row => row.status === 'supported')
+    && contact.filter(row => row.importance === 'required').every(row => row.status === 'supported')
+    && !criteria.some(row => row.status === 'contradicted' || row.status === 'conflicting');
+  const explanation = contactReason(assessment) || reason;
+  const opportunityUnknown = criteria.some(row => row.appliesTo === 'opportunity' && row.status === 'unknown');
+  const caveat = strong && opportunityUnknown && goal?.kind === 'career' ? ' A matching opening is not confirmed.' : '';
+  return {label: strong ? 'Strong potential' : 'Possible fit', tone: strong ? 'strong' : 'possible', reason: explanation + caveat};
 }
 function concise(value: string) {
   const clean = value.replace(/\s+/g, ' ').trim();

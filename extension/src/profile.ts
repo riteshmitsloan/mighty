@@ -57,8 +57,32 @@ function recentActivityDate(item:Element,now:string):string|null{
  }
  return null;
 }
-/** SDUI has no h1. A generic h2 is not an identity anchor: require the profile's
- * own verification marker inside its top card and primary content region. */
+/** The observed markerless layout has a Contact info identity in the same card
+ * and an independently URL-bound toolbar name. Agreement rejects partial SPA swaps. */
+function markerlessSubject(card:Element,scope:Element,profileUrl:string):{heading:Element;top:Element;scope:Element;card:Element}|null{
+ const headings=Array.from(card.querySelectorAll('h2')).filter(rendered);
+ if(headings.length!==1)return null;
+ const heading=headings[0],name=textOf(heading,Infinity),top=heading.closest('section');
+ if(!name||name.length>200||!top||top===scope||!card.contains(top)||!rendered(top))return null;
+ const contacts=Array.from(card.querySelectorAll('a[href]')).filter(rendered).filter(link=>{
+  if(/^contact info$/i.test(textOf(link,Infinity)))return true;
+  try{return /\/overlay\/contact-info\/?$/.test(new URL(link.getAttribute('href')||'',profileUrl).pathname);}catch{return false;}
+ });
+ if(contacts.length!==1||contacts[0].closest('section')!==top||!/^contact info$/i.test(textOf(contacts[0],Infinity)))return null;
+ try{if(new URL(contacts[0].getAttribute('href')||'',profileUrl).href!==profileUrl+'overlay/contact-info/')return null;}catch{return null;}
+ // The toolbar is a rendered profile summary, not the browser's canonical URL
+ // metadata. It must independently show this exact URL and the same subject name.
+ const summaries=Array.from(card.ownerDocument.querySelectorAll('[role="toolbar"] a[href]')).filter(rendered).filter(link=>
+  canonicalProfileURL(link.getAttribute('href')||'',profileUrl)&&Array.from(link.querySelectorAll('p')).some(rendered));
+ if(summaries.length!==1)return null;
+ const summary=summaries[0],paragraphs=Array.from(summary.querySelectorAll('p')).filter(rendered);
+ try{if(new URL(summary.getAttribute('href')||'',profileUrl).href!==profileUrl)return null;}catch{return null;}
+ if(paragraphs.length<1||paragraphs.length>2||paragraphs.some(p=>p.closest('a')!==summary)
+  ||textOf(paragraphs[0],Infinity).normalize('NFKC')!==name.normalize('NFKC'))return null;
+ return{heading,top,scope,card};
+}
+/** SDUI has no h1. A generic h2 is insufficient: bind the subject through its
+ * verification marker, or the narrowly observed Contact info + toolbar layout. */
 function sduiSubject(main:Element,profileUrl:string):{heading:Element;top:Element;scope:Element;card:Element}|null{
  const primary=Array.from(main.querySelectorAll('section[aria-label="Primary content"]')).filter(rendered);
  if(primary.length!==1)return null;
@@ -66,7 +90,7 @@ function sduiSubject(main:Element,profileUrl:string):{heading:Element;top:Elemen
  const cards=Array.from(scope.querySelectorAll('div[id^="com.linkedin.sdui.profile.card.ref"][id$="Topcard"],div[componentkey^="com.linkedin.sdui.profile.card.ref"][componentkey$="Topcard"]')).filter(rendered);
  if(cards.length!==1)return null;
  const card=cards[0],markers=Array.from(card.querySelectorAll('[componentkey^="ProfileVerificationTriggerRef-"]')).filter(rendered);
- if(!markers.length)return null;
+ if(!markers.length)return markerlessSubject(card,scope,profileUrl);
  let slug:string,decoded:string;try{slug=new URL(profileUrl).pathname.slice(4,-1);decoded=decodeURIComponent(slug);}catch{return null;}
  const expected=new Set(['ProfileVerificationTriggerRef-'+slug,'ProfileVerificationTriggerRef-'+decoded]);
  const keys=new Set(markers.map(marker=>marker.getAttribute('componentkey')||''));

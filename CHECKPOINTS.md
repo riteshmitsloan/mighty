@@ -10,6 +10,16 @@ Mighty supports intentional professional networking: choose a goal, inspect the 
 - Team: Ritesh Mohan Srivastava and Jayati Kambhampati.
 - This document records progress and a demo agenda. Updating it sends no submission or email.
 
+## Profile visibility, contact tiers and goal-chat repair: 0.3.8
+
+Native Chrome inspection reproduced a missing panel on a markerless LinkedIn profile. Its unique top card had a valid name and Contact info link but no verification-trigger marker. The new fallback requires agreement between that name, the exact Contact info URL and an independent rendered toolbar name/URL. Conflicting identities, incomplete navigation and self-edit controls still suppress the panel. Ten new regressions cover this layout and its boundaries; layouts without either supported identity path remain unread.
+
+A native comparison on the previously installed extension showed Possible fit for one senior contact's career goal and No clear connection yet for fundraising after Experience loaded. The initial repeated unknown label came from incomplete evidence. Separately, the old Strong potential rule required all opportunity criteria to be supported by contact-only evidence, making Strong unreachable for the owner's mixed career goal and single-criterion funding goal. Version 0.3.8 judges the compact contact tier separately: a verified user-chosen contact role can be Strong; provisional headlines, generic routes and partial preferences remain Possible. Opportunity unknowns remain unknown, and explicit contradictions still surface. Synthetic cross-goal cases cover executive, recruiter, investor and unrelated roles. No percentage or success probability is introduced.
+
+After explicit approval, only the owner's latest cached Ask response was read to reproduce the goal-chat error. The provider omitted origin metadata on unchanged criteria and invented a year in display text. The client restores omitted metadata only for the same existing identifier and exactly unchanged meaning. Unsupported displayed numbers or dates produce a neutral clarification with no proposal, no extra call and no goal change. The actual cached failure now replays as a timing question. Public tests contain an anonymized equivalent, not the private response. This is a replay, not a new live model-quality acceptance test.
+
+Validation: 482 release core, 146 UI and 234 extension checks passed, plus strict TypeScript and production packaging. All 19 installed files match the packaged ZIP, SHA256 a44fb58b029772c97dc02cbe76ab373b1baacb2b4ac0b3caa844d0dbaad210f1. Native 0.3.8 acceptance awaits Chrome Reload. Production deployment of 0.3.7 was verified at commit 55b0c6c, successful Pages run 34777460762, with matching app, plan and ZIP bytes.
+
 ## Contact relevance, common ground and activity: 0.3.7
 
 The owner confirmed 0.3.6 works across profiles. The remaining assessment gap involved contact-versus-opportunity logic and grouped Experience parsing. Version 0.3.7 adds conservative senior, recruiter, hiring-headline and investor routes. Explicit current child jobs retain both child and employer-group provenance. A headline supplies only a provisional route, not a current-role claim or Strong potential by itself.

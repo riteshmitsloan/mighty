@@ -158,3 +158,75 @@ test('raw plural model role terms become singular matches but unchanged saved cr
   const named=grounded('custom',['Founders Fund'],'Founders Fund');
   assert.deepEqual(parseGoalCoachReply(raw(named),context,answer('Founders Fund')).proposal?.criteria[0].terms,['Founders Fund']);
 });
+
+// Same response shape as the reported failure, with synthetic goal identifiers,
+// institution and role. No private cached response is included in this fixture.
+const careerContext:GoalCoachContext={kind:'career',title:'Find a research leadership role',outcome:'Find a research leadership role in manufacturing in Boston or Chicago, with help from recruiters and senior leaders.',criteria:[
+  {id:'goal-role',field:'role',label:'Role',terms:['Research Director'],importance:'preferred',appliesTo:'opportunity',origin:'user'},
+  {id:'goal-industry',field:'industry',label:'Industry',terms:['Manufacturing'],importance:'preferred',appliesTo:'opportunity',origin:'user'},
+  {id:'goal-location',field:'location',label:'Location',terms:['Boston','Chicago'],importance:'preferred',appliesTo:'opportunity',origin:'user'},
+  {id:'goal-contacts',field:'role',label:'People who could help',terms:['Director','Recruiter'],importance:'preferred',appliesTo:'contact',origin:'user'},
+],openQuestions:[]};
+const ambiguousAnswer=answer('i want a role in the USA - after my MBA at Example University starting my 27');
+const metadataOmitted=()=>({...careerContext,criteria:careerContext.criteria.map(({origin:_origin,...criterion})=>({...criterion,terms:[...criterion.terms]}))});
+
+test('cached failure shape with unchanged omitted origins and invented chronology becomes a neutral clarification',async()=>{
+  const before=JSON.stringify(careerContext),value={message:'Since you are beginning your MBA in 2027, should we focus on post-graduation placement?',proposal:{...metadataOmitted(),openQuestions:['Should the goal reflect a 2027 start date after the MBA?']}};
+  let calls=0;
+  const result=await coachGoal(careerContext,ambiguousAnswer,async request=>{
+    calls++;assert.match(request.system,/Never expand a short year/);assert.equal(request.maxTokens,2048);
+    return {text:JSON.stringify(value),remaining:10};
+  });
+  assert.equal(calls,1);assert.equal(result.proposal,null);assert.match(result.message,/What timing do you mean/);
+  assert.doesNotMatch(result.message,/2027|beginning|graduation|MBA/);assert.equal(JSON.stringify(careerContext),before);
+});
+
+test('unchanged existing-ID criteria alone may recover omitted origin without losing any saved semantics',()=>{
+  const result=parseGoalCoachReply(JSON.stringify({message:'Which role location would you like to clarify?',proposal:metadataOmitted()}),careerContext,ambiguousAnswer);
+  assert.deepEqual(result.proposal?.criteria,careerContext.criteria);
+  assert.notEqual(result.proposal?.criteria[0].terms,careerContext.criteria[0].terms);
+  for(const patch of [{id:'new-id'},{field:'custom'},{label:'A changed condition'},{terms:['USA']},{importance:'required'},{appliesTo:'contact'},{origin:null},{origin:'confirmed'}]){
+    const value=metadataOmitted();Object.assign(value.criteria[0],patch,{evidenceQuote:'USA'});
+    assert.throws(()=>parseGoalCoachReply(JSON.stringify({message:'Review.',proposal:value}),careerContext,ambiguousAnswer),JSON.stringify(patch));
+  }
+  const newCriterion={id:'new-location',field:'location',label:'New location',terms:['USA'],importance:'preferred',appliesTo:'opportunity',evidenceQuote:'USA'};
+  const value={...metadataOmitted(),criteria:[...metadataOmitted().criteria,newCriterion]};
+  assert.throws(()=>parseGoalCoachReply(JSON.stringify({message:'Review.',proposal:value}),careerContext,ambiguousAnswer));
+  const explicit={...value,criteria:[...metadataOmitted().criteria,{...newCriterion,origin:'suggested'}]};
+  assert.equal(parseGoalCoachReply(JSON.stringify({message:'Review.',proposal:explicit}),careerContext,ambiguousAnswer).proposal?.criteria.at(-1)?.origin,'suggested');
+});
+
+test('unsupported numbers in follow-up messages or open questions cannot borrow grounding from assistant text',()=>{
+  const messages:GoalCoachMessage[]=[{role:'assistant',text:'Would 2027 work?'},...ambiguousAnswer];
+  for(const value of [
+    {message:'Will you begin in 2027?',proposal:null},
+    {message:'Review these details.',proposal:{...metadataOmitted(),openQuestions:['Do you mean 2027?']}},
+    {message:'Should we target a $500K salary?',proposal:null},
+  ]){
+    const result=parseGoalCoachReply(JSON.stringify(value),careerContext,messages);
+    assert.equal(result.proposal,null);assert.doesNotMatch(result.message,/2027|500|salary/);
+  }
+});
+
+test('date clarification does not expand an ambiguous month or rearrange a known year into a new date',()=>{
+  const value=(message:string)=>JSON.stringify({message,proposal:null});
+  const expanded=parseGoalCoachReply(value('Do you mean May 27?'),careerContext,ambiguousAnswer);
+  assert.match(expanded.message,/What timing/);assert.doesNotMatch(expanded.message,/May/);
+  const known=answer('The program ends in May 2027.');
+  assert.match(parseGoalCoachReply(value('Do you mean June 2027?'),careerContext,known).message,/What timing/);
+  const literal='With the program ending in May 2027, which role would you like?';
+  assert.equal(parseGoalCoachReply(value(literal),careerContext,known).message,literal);
+  assert.equal(parseGoalCoachReply(value('What does “my 27” refer to?'),careerContext,ambiguousAnswer).message,'What does “my 27” refer to?');
+});
+
+test('proposal titles and outcomes cannot switch a grounded month while retaining its known year',()=>{
+  const known=answer('The program ends in May 2027.');
+  for(const field of ['title','outcome'] as const){
+    const value={...metadataOmitted(),[field]:'Find a role after the program ends in June 2027'};
+    const result=parseGoalCoachReply(JSON.stringify({message:'Review these details.',proposal:value}),careerContext,known);
+    assert.equal(result.proposal,null,field);assert.match(result.message,/What timing do you mean/);assert.doesNotMatch(result.message,/June/);
+    const literal={...value,[field]:'Find a role after the program ends in May 2027'};
+    assert.equal(parseGoalCoachReply(JSON.stringify({message:'Review these details.',proposal:literal}),careerContext,known).proposal?.[field],literal[field]);
+    assert.throws(()=>parseGoalCoachReply(JSON.stringify({message:'Review.',proposal:{...value,[field]:'Find a role in June 2028'}}),careerContext,known),'New proposal numbers retain the existing strict rejection.');
+  }
+});
