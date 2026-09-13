@@ -1,11 +1,11 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import {PGlite} from '@electric-sql/pglite';import {fileURLToPath} from 'node:url';
-import {buildSavedPersonEvidence} from '../src/lib/person-evidence';
+import {buildSavedPersonEvidence,savedPersonHeadline} from '../src/lib/person-evidence';
 import {readRelationshipData} from '../src/lib/data-access';
 import {MemoryServer} from './fake-client';
 import {assessCandidate} from '../src/lib/assessment';
 import type {Goal} from '../src/lib/goals';
 import {renderedCandidate} from '../extension/src/goal-assessment';
-import {inboxPayload} from '../extension/src/messaging';
+import {inboxPayload,validateSave} from '../extension/src/messaging';
 import type {Profile} from '../extension/src/types';
 const MIGRATIONS_ROOT=process.env.MIGRATIONS_ROOT ?? fileURLToPath(new URL('../supabase/migrations/',import.meta.url));
 const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222',P='33333333-3333-4333-8333-333333333333';
@@ -86,6 +86,39 @@ async function moduleAssertions(db: PGlite, t: import('node:test').TestContext) 
   await db.query(`insert into public.outreach_inbox(id,user_id,operation_id,profile_url,person,snapshot,profile_read_at) values($1,$2,$3,$4,'Module Person',$5::jsonb,$6)`,[id,A,crypto.randomUUID(),url,JSON.stringify(snapshot),observedAt]);return id;
  }
  async function consume(id:string){return (await db.query<any>('select public.consume_inbox($1) as id',[id])).rows[0].id as string;}
+ await t.test('a minimal headline save crosses the real inbox without a full-read claim and never replaces richer evidence',async()=>{
+  await asUser(A,async()=>{
+   const url='https://www.linkedin.com/in/partial-contract-fixture/',at='2026-09-13T12:00:00.000Z';
+   const photoUrl='https://media.licdn.com/dms/image/v2/PARTIAL_FIXTURE/profile-displayphoto-shrink_100_100/0/1?e=1800000000&v=beta&t=synthetic';
+   const profile:Profile={name:'Module Person',profileUrl:url,photoUrl,profileReadAt:null,truncated:false,truncationReasons:[],anchors:[
+    {kind:'headline',text:'Founder | Investor',sourceUrl:url+'#profile',observedAt:at},
+   ]};
+   const session={userId:A,accessToken:'synthetic-only',expiresAt:Date.parse(at)+3600000,strategy:''};
+   const payload=inboxPayload(validateSave({operationId:crypto.randomUUID(),userId:A,profile,source:'rendered_profile'},session));
+   assert.equal(payload.profile_read_at,null);
+   const item=await enqueue(payload.snapshot,payload.profile_read_at,url),relationship=await consume(item);
+   const load=async()=>{
+    const people=(await db.query<any>('select * from public.outreach_log where id=$1',[relationship])).rows;
+    const reads=(await db.query<any>('select * from public.profile_reads where relationship_id=$1',[relationship])).rows;
+    const server=new MemoryServer({outreach_log:people,profile_reads:reads});server.actor=A;
+    return{raw:people[0],reads,person:(await readRelationshipData(server.client,A)).people[0]};
+   };
+   const first=await load();assert.equal(first.reads.length,0);assert.equal(first.raw.context.profileComplete,false);
+   assert.deepEqual(first.person.profile,payload.snapshot);assert.equal(first.person.person,'Module Person');
+   assert.equal(first.person.photoUrl,photoUrl);assert.equal(savedPersonHeadline(first.person),'Founder | Investor');
+   assert.equal(buildSavedPersonEvidence(first.person).completeProfile,false);assert.equal(buildSavedPersonEvidence(first.person).profileReadAt,null);
+   assert.equal(await consume(item),relationship,'replaying the same item does not duplicate the relationship');
+   const full:Profile={...profile,profileReadAt:at,anchors:[{...profile.anchors[0],text:'A later complete profile'},
+    {kind:'about',text:'About the recorded complete profile.',sourceUrl:url+'#about',observedAt:at}]};
+   const complete=inboxPayload(validateSave({operationId:crypto.randomUUID(),userId:A,profile:full,source:'rendered_profile'},session));
+   assert.equal(await consume(await enqueue(complete.snapshot,complete.profile_read_at,url)),relationship);
+   const later=inboxPayload(validateSave({operationId:crypto.randomUUID(),userId:A,profile:{...profile,anchors:[{...profile.anchors[0],text:'A subsequent partial heading'}]},source:'rendered_profile'},session));
+   assert.equal(await consume(await enqueue(later.snapshot,later.profile_read_at,url)),relationship);
+   const loaded=await load();assert.equal(loaded.reads.length,1);assert.deepEqual(loaded.person.profile,complete.snapshot);
+   assert.equal(savedPersonHeadline(loaded.person),'A later complete profile');assert.equal(buildSavedPersonEvidence(loaded.person).completeProfile,true);
+   assert.deepEqual(loaded.raw.context.profile,payload.snapshot,'original partial source is retained without replacing the full read');
+  });
+ });
  await t.test('a LinkedIn photo survives the real inbox SQL and a later photo-less read without editing source history',async()=>{
   let relationship='';
   await asUser(A,async()=>{

@@ -78,9 +78,9 @@ test('a missing or no-longer-active manual selection falls back to the best acti
   }
 });
 
-test('an unread profile does not infer a best fit from its headline or claim a match',()=>{
+test('an absent or empty profile read cannot infer a best fit or claim a match',()=>{
   const calls:string[]=[];
-  for(const page of [null,profilePage('Investor at Example Organization',[],false)]){
+  for(const page of [null,profilePage('',[],false)]){
     const view=render({page,onSelect:id=>calls.push(id)});
     assert.equal(selected(view),'Career');assert.equal(label(view),'Not enough information');
     assert.doesNotMatch(view.querySelector('.reason')?.textContent||'',/investor role|venture fits/);
@@ -90,8 +90,34 @@ test('an unread profile does not infer a best fit from its headline or claim a m
 
 test('a later complete read can choose the fitting goal when the user has not made a selection',()=>{
   const calls:string[]=[];
-  const before=render({page:profilePage('Investor at Example Organization',[],false),onSelect:id=>calls.push(id)});
+  const before=render({page:profilePage('',[],false),onSelect:id=>calls.push(id)});
   assert.equal(selected(before),'Career');assert.equal(label(before),'Not enough information');
   const after=render({page:profilePage(),selectedGoalId:null,onSelect:id=>calls.push(id)});
   assert.equal(selected(after),'Fundraising');assert.equal(label(after),'Possible fit');assert.deepEqual(calls,[]);
+});
+
+test('a direct investor signal wins over a generic founder career route at the same fit tier',()=>{
+  const helperCareer={...career,criteria:[{...career.criteria[0],terms:['Chief AI Officer','CEO','Founder','Vice President','Recruiter']}]};
+  for(const ready of [false,true]){
+    const page=profilePage('Founder | Investor',[],ready);
+    const careerView=render({page,selectedGoalId:career.id});assert.equal(label(careerView),'Possible fit');
+    const fundingView=render({page,selectedGoalId:funding.id});assert.equal(label(fundingView),'Possible fit');
+    const automatic=render({page});assert.equal(selected(automatic),'Fundraising');
+    assert.match(automatic.querySelector('.reason')?.textContent||'',/investor role/);
+    assert.equal(selected(render({page,selectedGoalId:career.id})),'Career','A deliberate choice overrides route specificity.');
+    assert.equal(selected(render({page,goalContext:context([helperCareer,funding])})),'Fundraising','A broad helper-role criterion does not turn Founder into the target professional role.');
+  }
+  const actualPeer=profilePage('Chief AI Officer | Investor',[],false);
+  assert.equal(selected(render({page:actualPeer,goalContext:context([helperCareer,funding])})),'Career','An actual target-role peer keeps the stable tie with a direct investor signal.');
+  const explicitFounder={...helperCareer,criteria:[...helperCareer.criteria,{...helperCareer.criteria[0],id:'target',appliesTo:'opportunity' as const,terms:['Founder']}]};
+  assert.equal(selected(render({page:profilePage('Founder | Investor',[],false),goalContext:context([explicitFounder,funding])})),'Career','An explicit Founder opportunity remains a direct peer target.');
+});
+
+test('supported contact criteria break equal displayed tiers before generic route specificity',()=>{
+  const careerWithUnknown={...career,criteria:[...career.criteria,{id:'city',field:'location' as const,label:'Contact city',terms:['Boston'],importance:'preferred' as const,appliesTo:'contact' as const,origin:'user' as const}]};
+  const page=profilePage('Investor',['CEO']);
+  const goalContext=context([funding,careerWithUnknown]);
+  assert.equal(label(render({page,goalContext,selectedGoalId:career.id})),'Possible fit');
+  assert.equal(label(render({page,goalContext,selectedGoalId:funding.id})),'Possible fit');
+  assert.equal(selected(render({page,goalContext})),'Career');
 });

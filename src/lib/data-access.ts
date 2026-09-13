@@ -3,6 +3,7 @@ import { cleanText } from './text';
 import {verifiedCompanyOverlap,type Connection} from './discover';
 import {companyKey} from './archive';
 import {canonicalProfilePhotoUrl,snapshotPhotoUrl} from './profile-photo';
+import {savedPartialProfile} from './partial-profile';
 export interface Person { id:string;person:string;profile_url:string|null;stage:string;context:Record<string,unknown>;created_at:string;profile?:Record<string,unknown>;photoUrl?:string }
 export interface Capture { id:string;relationship_id:string;kind:string;body:string;related_event_id:string|null;created_at:string }
 interface ProfileRead { id:string;relationship_id:string;snapshot:Record<string,unknown>;observed_at:string;created_at:string }
@@ -36,7 +37,7 @@ export async function readRelationshipData(client:SupabaseClient,uid:string){
  const byId=new Map(people.map(person=>[person.id,person])),photos=new Map<string,string>();
  for(const read of reads){const owner=byId.get(read.relationship_id);if(!owner||photos.has(owner.id))continue;const photo=snapshotPhotoUrl(read.snapshot,owner.profile_url);if(photo)photos.set(owner.id,photo);}
  return {people:people.map(person=>{const photoUrl=photos.get(person.id)||snapshotPhotoUrl(person.context.profile,person.profile_url)||canonicalProfilePhotoUrl(person.context.photoUrl);return {...person,
-  profile:latest.get(person.id)||(person.context.profileComplete?person.context.profile as Record<string,unknown>:undefined),...(photoUrl?{photoUrl}:{})};}),events};
+  profile:latest.get(person.id)||(person.context.profileComplete?person.context.profile as Record<string,unknown>:savedPartialProfile(person.context.profile,person.profile_url)||undefined),...(photoUrl?{photoUrl}:{})};}),events};
 }
 export async function readConnectionsData(client:SupabaseClient,uid:string):Promise<Connection[]>{
  const [rows,source]=await Promise.all([

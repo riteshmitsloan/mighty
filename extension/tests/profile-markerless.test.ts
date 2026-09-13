@@ -35,11 +35,12 @@ test('the observed markerless top card reads its unique URL-bound name and enabl
   assert.ok(!profile.anchors.some(anchor=>anchor.kind==='location'||anchor.field!==undefined), 'The corroborated headline stays context; unlabelled paragraphs are not invented typed fields.');
 });
 
-test('a markerless name-only profile mounts read-only UI without becoming complete or saveable', () => {
+test('a markerless name and verified headline can save as incomplete without unlocking a brief', () => {
   const document = documentOf(card(),''), profile = readProfile(document,url,now)!;
   assert.equal(profilePanelEligibility(document,url),'other'); assert.equal(profile.profileReadAt,null);
   assert.equal(canRequestBrief(profile),false); assert.equal(snapshot(document,url).state,'unknown');
-  assert.throws(()=>save(profile),/actual profile/);
+  const saved=save(profile);assert.equal(saved.profile.profileReadAt,null);
+  assert.deepEqual(saved.profile.anchors,profile.anchors);assert.equal(saved.profile.anchors.length,1);
 });
 
 test('missing, foreign, duplicated and unsafe Contact info links cannot establish the markerless identity', () => {

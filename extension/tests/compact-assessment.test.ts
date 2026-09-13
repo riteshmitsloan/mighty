@@ -112,7 +112,7 @@ test('a newly saved criterion changes the result immediately without retrofittin
 test('an incomplete read and a too-large read give distinct recovery instructions', () => {
   const goal = makeGoal('career', [criterion('role', ['CEO'])]);
   const incomplete: PageSnapshot = {...page, state: 'unknown', profile: {...profile, anchors: profile.anchors.slice(0, 1), profileReadAt: null}};
-  assert.match(rendered(goal, incomplete).querySelector('.reason')?.textContent || '', /complete section read is not.*About or Experience/);
+  assert.match(rendered(goal, incomplete).querySelector('.reason')?.textContent || '', /Only their headline is available.*More profile context/);
   const large: PageSnapshot = {...page, state: 'unknown', profile: {...profile, truncated: true, profileReadAt: null}};
   assert.match(rendered(goal, large).querySelector('.reason')?.textContent || '', /exceeds the save limit/);
   assert.doesNotMatch(rendered(goal, large).textContent || '', /Add goal details/);

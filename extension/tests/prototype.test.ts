@@ -46,11 +46,12 @@ test('queued account A saves are never drained under account B',()=>{const row={
 test('partial real reads preserve anchors but never send a profile_read_at',()=>{const profile={...rich(),truncated:true,truncationReasons:['anchor_text_limit'],profileReadAt:null};const save=validateSave({userId:uid,operationId,profile,source:'rendered_profile'},s);const payload=inboxPayload(save);assert.equal(payload.profile_read_at,null);assert.equal(payload.snapshot.profileReadAt,null);assert.equal(payload.snapshot.source,'rendered_profile');assert.ok(payload.snapshot.anchors.length);assert.ok(!('source'in payload));assert.ok(!('profile_snapshot'in payload));});
 test('more than sixteen section items and forty anchors are all preserved',()=>{const items=Array.from({length:55},(_,i)=>'<li>Skill item '+i+'</li>').join('');const p=readProfile(documentOf('<main><section><h1>Person</h1><div data-field="headline">Healthcare engineer</div></section><section><h2>Skills</h2><ul>'+items+'</ul></section></main>'),profileUrl,now)!;assert.equal(p.truncated,false);assert.equal(p.anchors.filter(a=>a.kind==='skills').length,55);assert.ok(p.anchors.some(a=>a.text==='Skill item 54'));assert.equal(p.profileReadAt,now);assert.equal(canRequestBrief(p),true);assert.doesNotThrow(()=>validateSave({userId:uid,operationId,profile:p,source:'rendered_profile'},s));});
 test('long search fields are explicitly incomplete instead of silently clipped',()=>{const results=readSearchResults(documentOf('<main><li><h3><a href="/in/long-name/">'+'Long '.repeat(80)+'</a></h3></li></main>'),searchUrl);assert.equal(results.length,1);assert.equal(results[0].truncated,true);assert.equal(results[0].profileReadAt,null);});
-test('headline-only profiles and empty section labels never unlock a brief or a rendered-profile save',()=>{
+test('headline-only saves remain incomplete and empty section labels never unlock a brief',()=>{
  for(const extra of['','<section><h2>Experience</h2></section>','<section><h2>Skills</h2><a>Show all skills</a></section>']){
   const p=readProfile(documentOf('<main><section><h1>A Person</h1><div data-field="headline">Healthcare engineer</div></section>'+extra+'</main>'),profileUrl,now)!;
   assert.equal(p.profileReadAt,null);assert.equal(hasSubstantiveProfile(p),false);assert.equal(canRequestBrief(p),false);assert.equal(goalFit('healthcare',p).label,'Not enough context');
-  assert.throws(()=>validateSave({userId:uid,operationId,profile:p,source:'rendered_profile'},s),/actual profile/);
+  const saved=validateSave({userId:uid,operationId,profile:p,source:'rendered_profile'},s);
+  assert.equal(saved.profile.profileReadAt,null);assert.equal(saved.profile.anchors.length,1);assert.equal(saved.profile.anchors[0].kind,'headline');
   assert.equal(canRequestBrief({...p,profileReadAt:now}),false);assert.throws(()=>validateSave({userId:uid,operationId,profile:{...p,profileReadAt:now},source:'rendered_profile'},s),/actual profile/);
  }
 });

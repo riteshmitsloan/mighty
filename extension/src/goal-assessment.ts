@@ -4,6 +4,7 @@ import type {Goal} from '../../src/lib/goals';
 import {validCurrentExperienceAnchor} from '../../src/lib/current-experience';
 import {validateGoalContext, type AccountGoalContext} from './goal-context.js';
 import {canRequestBrief} from './scoring.js';
+import {partialProfileProjection} from '../../src/lib/partial-profile';
 import type {PageSnapshot, Profile} from './types.js';
 import {validateExtensionSelfContext, type SelfEvidenceContext} from '../../src/lib/extension-self-context';
 
@@ -30,19 +31,27 @@ export function renderedCandidate(profile: Profile): CandidateEvidence {
       field: anchor.field === undefined ? undefined : validCurrentExperienceAnchor(anchor, profile.anchors, profile.profileUrl, profile.profileReadAt) ? anchor.field : 'context',
       appliesTo: 'contact' as const}))});
 }
+/** The trusted content caller verifies the rendered subject before assessment.
+ * Headline context permits provisional routes independently of lower sections. */
+function headlineCandidate(snapshot: PageSnapshot | null): CandidateEvidence | null {
+  if (snapshot?.kind !== 'profile' || snapshot.state !== 'unknown') return null;
+  const profile = partialProfileProjection(snapshot.profile);
+  return profile ? renderedCandidate(profile) : null;
+}
 export type ProfileGoalAssessment = {goal: Goal; assessment: CandidateAssessment};
-export type GoalAssessmentResult = {state: 'ready'; candidate: CandidateEvidence; assessments: readonly ProfileGoalAssessment[]; contextKey: string}
+export type GoalAssessmentResult = {state: 'ready'; basis: 'profile' | 'headline'; candidate: CandidateEvidence; assessments: readonly ProfileGoalAssessment[]; contextKey: string}
   | {state: 'no_goals' | 'no_active_goals' | 'unread'; message: string};
 /** No result cache: each account/goal version/profile change receives a fresh shared-core assessment. */
 export function assessProfileGoals(userId: string, context: AccountGoalContext, snapshot: PageSnapshot | null, selfContext?: SelfEvidenceContext | null): GoalAssessmentResult {
   const trusted = validateGoalContext(context, userId);
-  if (!snapshot || snapshot.kind !== 'profile' || snapshot.state !== 'ready' || !canRequestBrief(snapshot.profile)) {
+  const complete = snapshot?.kind === 'profile' && snapshot.state === 'ready' && canRequestBrief(snapshot.profile);
+  const candidate = complete ? renderedCandidate(snapshot.profile!) : headlineCandidate(snapshot);
+  if (!candidate) {
     return {state: 'unread', message: unreadReason(snapshot)};
   }
   if (!trusted.goals.length) return {state: 'no_goals', message: 'No goals are saved to this account. In Mighty, use Save goal to account to include a device draft here.'};
   const goals = trusted.goals.filter(goal => goal.status === 'active');
   if (!goals.length) return {state: 'no_active_goals', message: 'This account has no active saved goals. Activate and save a goal in Mighty.'};
-  const candidate = renderedCandidate(snapshot.profile!);
   const self = validateExtensionSelfContext(selfContext, userId);
-  return {state: 'ready', candidate, contextKey: trusted.key + (self ? ':' + self.key : ''), assessments: goals.map(goal => ({goal, assessment: assessCandidate(goal, candidate, self?.claims ?? [])}))};
+  return {state: 'ready', basis: complete ? 'profile' : 'headline', candidate, contextKey: trusted.key + (self ? ':' + self.key : ''), assessments: goals.map(goal => ({goal, assessment: assessCandidate(goal, candidate, self?.claims ?? [])}))};
 }

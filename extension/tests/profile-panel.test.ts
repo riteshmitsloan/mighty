@@ -35,6 +35,30 @@ async function harness(initial:PageSnapshot={kind:'profile',state:'ready',profil
  const panel=createProfilePanel({document,runtime:runtime as any,url:()=>state.url,read:()=>{state.readCount++;if(state.readError)throw Error('Unreadable page');return state.page;}});
  await tick();return{state,panel,document,calls,ports,find:(selector:string)=>panel.shadow.querySelector(selector) as HTMLElement,all:(selector:string)=>[...panel.shadow.querySelectorAll(selector)] as HTMLElement[]};
 }
+test('a verified header can be saved without pretending that the full profile was read',async()=>{
+ const header:Profile={...profile(),profileReadAt:null,anchors:[
+  {kind:'headline',text:'Founder | Investor',sourceUrl:profileUrl+'#profile',observedAt:date},
+  {kind:'about',text:'Unfinished lower section',sourceUrl:profileUrl+'#about',observedAt:date}
+ ]};
+ const original=structuredClone(header);
+ const h=await harness({kind:'profile',state:'unknown',profile:header,message:''});
+ try{
+  assert.equal((h.find('.save') as HTMLButtonElement).disabled,false);
+  h.find('.save').click();await tick();
+  const request=h.calls.find(row=>row.type==='mighty:save')?.save;
+  assert.ok(request);assert.equal(request.source,'rendered_profile');assert.equal(request.userId,uid);
+  assert.equal(request.profile.profileReadAt,null);assert.equal(request.profile.truncated,false);
+  assert.deepEqual(request.profile.anchors,[header.anchors[0]]);
+  assert.deepEqual(header,original);assert.equal(h.find('.save').textContent,'Saved to Mighty');
+ }finally{h.panel.dispose();}
+});
+test('a blocked page and a header tied to another profile cannot be saved',async()=>{
+ for(const state of ['blocked','auth_required','wrong_subject'] as const){
+  const p:Profile={...profile(),profileReadAt:null,anchors:[{kind:'headline',text:'Investor',sourceUrl:(state==='wrong_subject'?'https://www.linkedin.com/in/other/':profileUrl)+'#profile',observedAt:date}]};
+  const h=await harness({kind:'profile',state:state==='wrong_subject'?'unknown':state,profile:p,message:''});
+  try{assert.equal((h.find('.save') as HTMLButtonElement).disabled,true);h.find('.save').click();await tick();assert.equal(h.calls.some(row=>row.type==='mighty:save'),false);}finally{h.panel.dispose();}
+ }
+});
 test('compact panel mounts automatically with two goal pills, one result and no evidence sections',async()=>{
  const h=await harness();try{
   assert.ok(h.document.querySelector('#mighty-profile-panel'));assert.equal(h.panel.host.shadowRoot,null);

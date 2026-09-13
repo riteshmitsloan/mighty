@@ -2,6 +2,7 @@ import {compactProfile, COMPACT_PROFILE_CSS, element} from './compact-profile.js
 import {mightyAppLink} from './app-link.js';
 import {snapshot} from './profile.js';
 import {canonicalProfileURL} from './urls.js';
+import {partialProfileProjection} from '../../src/lib/partial-profile';
 import {loadPanelFont, PANEL_FONT_FAMILY} from './panel-font.js';
 import type {AccountGoalContext} from './goal-context.js';
 import type {SelfEvidenceContext} from '../../src/lib/extension-self-context';
@@ -37,7 +38,7 @@ function contentKey(page: PageSnapshot) {
 }
 function profileSaveable(profile: Profile | null) {
   return Boolean(profile && !profile.truncationReasons.includes('snapshot_size_limit')
-    && (profile.profileReadAt || (profile.truncated && profile.anchors.length)));
+    && (profile.profileReadAt || (profile.truncated && profile.anchors.length) || partialProfileProjection(profile)));
 }
 export function createProfilePanel(options: ProfilePanelOptions) {
   const {document: doc, runtime} = options;
@@ -114,7 +115,7 @@ export function createProfilePanel(options: ProfilePanelOptions) {
     skip.addEventListener('click', () => {skippedRoute = route; render(); (surface.querySelector('.reopen') as HTMLButtonElement)?.focus();});
     const save = el('button', saving ? 'Saving…' : pageSaved() ? 'Saved to Mighty' : 'Save to Mighty', 'save'); save.type = 'button'; save.dataset.focus = 'save';
     save.disabled = saving || checking || !account.connected || !account.userId || !page
-      || page.kind !== 'profile' || !profileSaveable(page.profile) || Boolean(pageSaved());
+      || page.kind !== 'profile' || !['ready','unknown'].includes(page.state) || !profileSaveable(page.profile) || Boolean(pageSaved());
     save.addEventListener('click', () => void saveSelected()); footer.append(skip, save); surface.append(footer);
     if (focusKey) (surface.querySelector(`[data-focus="${focusKey}"]`) as HTMLElement)?.focus();
   }
@@ -145,10 +146,13 @@ export function createProfilePanel(options: ProfilePanelOptions) {
   }
   async function saveSelected() {
     if (!runtimeReady()) return;
-    if (saving || checking || !account.connected || !account.userId || page?.kind !== 'profile') return;
+    if (saving || checking || !account.connected || !account.userId || page?.kind !== 'profile' || !['ready','unknown'].includes(page.state)) return;
     if (!profileSaveable(page.profile) || pageSaved()) return;
     const source = 'rendered_profile';
-    const profiles = page.profile ? [page.profile] : [];
+    // A verified header is useful to save without claiming that lower sections
+    // were read. Only its validated headline, identity and photo travel onward.
+    const savedProfile = page.profile?.profileReadAt || page.profile?.truncated ? page.profile : partialProfileProjection(page.profile);
+    const profiles = savedProfile ? [savedProfile] : [];
     if (!profiles.length) return;
     const owner = account.userId, epoch = accountEpoch, savedRoute = route, snapshotKey = pageKey;
     saving = true; notice = ''; render();

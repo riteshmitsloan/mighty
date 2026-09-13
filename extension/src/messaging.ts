@@ -3,6 +3,7 @@ import{AccountConnectionError}from'./account-errors.js';
 import{validCurrentExperienceAnchor}from'../../src/lib/current-experience';
 import{canonicalProfileURL,exactAppURL}from'./urls.js';
 import{canonicalProfilePhotoUrl}from'../../src/lib/profile-photo';
+import{partialProfileProjection}from'../../src/lib/partial-profile';
 import type{PendingSave,Profile,PublicConfig,SaveInput,Session}from'./types.js';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export function isExternalSender(sender:{url?:string;origin?:string;id?:string},allowedOrigins:string[]):boolean{
@@ -38,14 +39,17 @@ export function validateSave(value:unknown,session:Session):SaveInput{
  const p=x.profile;if(!p||canonicalProfileURL(p.profileUrl)!==p.profileUrl||typeof p.name!=='string'||!p.name.trim()||p.name.length>200||!Array.isArray(p.anchors)||typeof p.truncated!=='boolean'||!Array.isArray(p.truncationReasons))throw Error('The profile snapshot is invalid.');
  if(p.photoUrl!==undefined&&canonicalProfilePhotoUrl(p.photoUrl)!==p.photoUrl)throw Error('The profile photo must use a supported LinkedIn image URL.');
  if(x.source==='search_result'&&(p.profileReadAt!==null||p.anchors.length))throw Error('Search snippets cannot be marked as a profile read.');
- if(x.source==='rendered_profile'&&(!hasSubstantiveProfile(p)||(!p.truncated&&(!p.profileReadAt||!Number.isFinite(Date.parse(p.profileReadAt))))))throw Error('Read the actual profile before saving this snapshot.');
+ // The caller projects an explicitly verified header before saving. Refuse
+ // additional partial sections here instead of silently accepting typed facts.
+ const partial=x.source==='rendered_profile'&&p.profileReadAt===null&&!p.truncated&&p.anchors.length===1?partialProfileProjection(p):null;
+ if(x.source==='rendered_profile'&&!partial&&(!hasSubstantiveProfile(p)||(!p.truncated&&(!p.profileReadAt||!Number.isFinite(Date.parse(p.profileReadAt))))))throw Error('Read the actual profile before saving this snapshot.');
  const kinds=['headline','location','about','experience','education','skills','languages','certifications','activity','timing'];
  for(const a of p.anchors){
   if(!a||!kinds.includes(a.kind)||typeof a.text!=='string'||!a.text.trim()||typeof a.sourceUrl!=='string'||!a.sourceUrl.startsWith(p.profileUrl+'#')||!Number.isFinite(Date.parse(a.observedAt)))throw Error('An evidence anchor is invalid.');
   if((a.field!==undefined||a.currentExperience!==undefined)&&!validCurrentExperienceAnchor(a,p.anchors,p.profileUrl,p.profileReadAt??a.observedAt))throw Error('A current experience field needs valid visible source and date evidence.');
  }
  if(p.truncationReasons.includes('snapshot_size_limit')||new TextEncoder().encode(JSON.stringify(p)).length>49152)throw Error('This profile exceeds the snapshot size limit. Its full context has not been saved.');
- return{operationId:x.operationId,userId:x.userId,profile:p,source:x.source};
+ return{operationId:x.operationId,userId:x.userId,profile:partial??p,source:x.source};
 }
 export function inboxPayload(save:SaveInput){const readAt=save.source==='rendered_profile'&&!save.profile.truncated?save.profile.profileReadAt:null;return{operation_id:save.operationId,user_id:save.userId,profile_url:save.profile.profileUrl,person:save.profile.name,snapshot:{...save.profile,profileReadAt:readAt,source:save.source},profile_read_at:readAt};}
 export function pendingKey(save:Pick<SaveInput,'userId'|'operationId'>){return 'pending:'+save.userId+':'+save.operationId;}

@@ -2,6 +2,7 @@ import type {Person} from './data-access';
 import {buildCandidateEvidence, createEvidenceClaim, type EvidenceAnchor} from './evidence';
 import {validCurrentExperienceAnchor} from './current-experience';
 import {deepFreeze} from './text';
+import {savedPartialProfile} from './partial-profile';
 
 function verifiedProfileRead(person: Person, readAt: string | null): boolean {
   const profile = person.profile;
@@ -16,7 +17,7 @@ function newerProfileRead(person: Person, readAt: string | null): boolean {
 
 /** Preserve the extension's source timestamp and every anchor when opening a saved person. */
 export function buildSavedPersonEvidence(person: Person) {
-  const profile = person.profile;
+  const profile: Record<string, unknown> | undefined = savedPartialProfile(person.profile, person.profile_url) ?? person.profile;
   const anchors = Array.isArray(profile?.anchors) ? profile.anchors.filter((value): value is EvidenceAnchor =>
     Boolean(value && typeof value === 'object' && typeof value.text === 'string' && typeof value.kind === 'string')) : [];
   // An explicit null means no complete read; legacy dates are only a fallback for older records.
@@ -66,6 +67,8 @@ export function savedPersonHeadline(person: Person): string {
   const fallback = [person.context.position, person.context.company]
     .filter(value => typeof value === 'string' && value).join(' · ')
     || (typeof person.context.searchHeadline === 'string' ? person.context.searchHeadline : '');
+  const partial = savedPartialProfile(person.profile, person.profile_url);
+  if (partial) return fallback || partial.anchors[0].text;
   const candidate = buildSavedPersonEvidence(person);
   // First-time extension saves are inserted after the profile was read. With no
   // older display value to replace, validated source details can fill the blank.

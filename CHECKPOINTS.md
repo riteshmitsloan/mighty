@@ -10,6 +10,20 @@ Mighty supports intentional professional networking: choose a goal, inspect the 
 - Team: Ritesh Mohan Srivastava and Jayati Kambhampati.
 - This document records progress and a demo agenda. Updating it sends no submission or email.
 
+## Incomplete profile assessment and saving: 0.3.11
+
+Two shared gates caused the repeated investor failures. Goal assessment previously required a substantive About/Experience-style read even when identity and headline were verified. Separately, investor routes missed qualified titles such as Early-Stage Investor. Both paths are corrected. Incomplete reads use only the validated, source-bound headline for provisional contact relevance. They never satisfy typed criteria or become Strong potential. Common stage and sector prefixes are recognized without inventing mandate, stage, industry or check size; investor-relations and recruiting/support titles remain excluded.
+
+The default goal now compares displayed fit tier, supported contact criteria and direct contact relevance. A Founder | Investor headline with broad career-helper criteria opens funding; a genuine target-role tie preserves goal order. Manual selection still wins until the profile changes.
+
+Save now accepts a verified partial header. The submitted snapshot contains only name, supported photo and one untyped headline; profileReadAt stays null. The existing inbox transaction saves the relationship without creating a completed profile-read record. The app displays the saved headline and marks Profile header saved. A later complete read takes precedence; later partial saves cannot replace a richer read. Existing repeated partial-only saves preserve the original context rather than silently replacing it.
+
+Acceptance: five real rendered profile captures were replayed through the revised parser, assessment and panel selection, both as captured and with only the top card (10 cases). Funding leads for the two investor examples and the founder/investor; career leads for the founder/CEO; the student has no inferred investor route. Will's exact DOM has no About/Experience section, which confirms that telling him to scroll could not solve the failure. Public regression fixtures remain synthetic; raw captured DOM stays private. A real local PostgreSQL-compatible inbox contract check verifies the partial save and later full-read precedence. Installed Chrome acceptance of 0.3.11 is pending one Reload; these replay and local database checks are not represented as live account writes.
+
+Validation: 498 release core, 257 extension and 146 app UI checks pass, plus strict TypeScript and production packaging. Independent review found no release blocker. All 19 files in the existing installed folder match the tested ZIP, SHA256 f7546f9b2a93a6ec9eb429b7aebef45ea77905fef7a8676e41c9d13ee35daf86. Native installed 0.3.11 acceptance is still pending Chrome Reload.
+
+The requested relationship-list and person-page design changes are preserved locally and held from this stability release while extension verification takes priority.
+
 ## Open on the best-fitting goal: 0.3.10
 
 The automatic profile panel now selects Strong potential before Possible fit, keeping saved goal order for ties or when no goal has a relevant fit. Raw ranking values are not compared across goals. A deliberate pill selection remains selected while the same profile loads more evidence; moving to a different profile restores automatic selection. This changes only the displayed goal, not saved goals, account state or scoring evidence.

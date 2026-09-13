@@ -1,4 +1,5 @@
-import type {CandidateAssessment} from '../../src/lib/assessment';
+import {assessCandidate, phraseTokens, type CandidateAssessment} from '../../src/lib/assessment';
+import type {CandidateEvidence} from '../../src/lib/evidence';
 import type {Goal} from '../../src/lib/goals';
 import {canonicalProfilePhotoUrl} from '../../src/lib/profile-photo';
 import type {SelfEvidenceContext} from '../../src/lib/extension-self-context';
@@ -11,6 +12,20 @@ export function element<K extends keyof HTMLElementTagNameMap>(doc: Document, ta
   const node = doc.createElement(tag); node.textContent = text; node.className = className; return node;
 }
 export type CompactFit = {label: 'Strong potential' | 'Possible fit' | 'Low fit' | 'No clear connection yet' | 'Not enough information' | 'Add goal details'; tone: 'strong' | 'possible' | 'low' | 'unknown'; reason: string};
+// A broad list of people who might help can produce a "peer" route for Founder.
+// That is less specific than matching the actual target role. This affects only
+// the initial goal display, never a criterion, route, label or ordering score.
+const broadHelperRoles = new Set(['founder', 'cofounder', 'co founder', 'ceo', 'chief executive officer', 'vp', 'vice president', 'svp', 'evp', 'senior vice president', 'executive vice president', 'director', 'executive', 'senior leader']);
+function specificPeer(goal: Goal, assessment: CandidateAssessment, candidate: CandidateEvidence) {
+  if (!assessment.contactRoutes.some(route => route.kind === 'peer')) return false;
+  const opportunity = goal.criteria.filter(row => row.field === 'role' && row.appliesTo === 'opportunity' && row.terms.some(term => term.trim()));
+  const contact = goal.criteria.filter(row => row.field === 'role' && row.appliesTo === 'contact');
+  const terms = contact.flatMap(row => row.terms);
+  const criteria = opportunity.length ? opportunity : contact.map(row => ({...row, terms: row.terms.filter(term => terms.length === 1 || !broadHelperRoles.has(phraseTokens(term).join(' ')))})).filter(row => row.terms.length);
+  // Reuse the same reviewed aliases, exclusions and negation rules, with only
+  // the specific role criteria. This result is not persisted or shown as a score.
+  return criteria.length > 0 && assessCandidate({...goal, criteria}, candidate).contactRoutes.some(route => route.kind === 'peer');
+}
 function contactReason(assessment: CandidateAssessment): string | undefined {
   const route = assessment.contactRoutes[0];
   if (!route) return undefined;
@@ -93,12 +108,31 @@ export function compactProfile(doc: Document, options: CompactProfileOptions): H
     if (!goals.length) {
       section.append(element(doc, 'p', options.goalContext.goals.length ? 'Activate a saved goal in Mighty.' : 'Save a goal to your account in Mighty.', 'hint')); return section;
     }
-    const fits = new Map(result.state === 'ready' ? result.assessments.map(row => [row.goal.id, compactFit(row.assessment, row.goal)] as const) : []);
-    // Default to the most relevant goal without comparing raw ranks across goals.
+    const fits = new Map(result.state === 'ready' ? result.assessments.map(row => {
+      const fit: CompactFit = result.basis === 'headline' && hasGoalCriteria(row.goal) && !row.assessment.contactRoutes.length
+        ? {label: 'Not enough information', tone: 'unknown', reason: 'Only their headline is available so far. More profile context may show a connection to this goal.'}
+        : compactFit(row.assessment, row.goal);
+      return [row.goal.id, fit] as const;
+    }) : []);
+    // Compare the displayed tier, then supported contact criteria, then whether
+    // the route directly addresses this goal. Never compare raw ranks across goals.
+    const priority = (goal: Goal) => {
+      const assessment = result.state === 'ready' ? result.assessments.find(row => row.goal.id === goal.id)?.assessment : undefined;
+      const tone = fits.get(goal.id)?.tone;
+      return [tone === 'strong' ? 2 : tone === 'possible' ? 1 : 0,
+        assessment?.criteria.filter(row => row.appliesTo === 'contact' && row.status === 'supported').length ?? 0,
+        assessment && (assessment.contactRoutes.some(route => ['investor', 'recruiter', 'hiring_signal'].includes(route.kind))
+          || (result.state === 'ready' && specificPeer(goal, assessment, result.candidate))) ? 2
+          : assessment?.contactRoutes.some(route => ['peer', 'executive_hiring', 'senior_contact'].includes(route.kind)) ? 1 : 0];
+    };
+    const better = (goal: Goal, best: Goal) => {
+      const next = priority(goal), current = priority(best);
+      const difference = next.findIndex((value, index) => value !== current[index]);
+      return difference >= 0 && next[difference] > current[difference];
+    };
     // A deliberate selection stays in place while this profile finishes loading.
-    const priority = (goal: Goal) => fits.get(goal.id)?.tone === 'strong' ? 2 : fits.get(goal.id)?.tone === 'possible' ? 1 : 0;
     const selected = goals.find(goal => goal.id === options.selectedGoalId)
-      ?? goals.reduce((best, goal) => priority(goal) > priority(best) ? goal : best, goals[0]);
+      ?? goals.reduce((best, goal) => better(goal, best) ? goal : best, goals[0]);
     const pills = element(doc, 'div', '', 'goal-pills'); pills.setAttribute('role', 'group'); pills.setAttribute('aria-label', 'Choose a goal');
     for (const goal of goals) {
       const button = element(doc, 'button', goal.title, 'goal-pill'); button.type = 'button'; button.title = goal.title;

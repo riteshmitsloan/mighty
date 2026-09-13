@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {readProfile, snapshot} from '../src/profile.js';
 import {assessProfileGoals} from '../src/goal-assessment.js';
-import {compactFit} from '../src/compact-profile.js';
+import {compactFit, compactProfile} from '../src/compact-profile.js';
+import {canRequestBrief} from '../src/scoring.js';
+import {inboxPayload} from '../src/messaging.js';
+import {partialProfileProjection} from '../../src/lib/partial-profile';
 import {accountGoalContext} from '../src/goal-context.js';
 import {createGoal} from '../../src/lib/goals';
 
@@ -51,10 +54,64 @@ for(const marked of [false,true])test(`${marked?'verified':'markerless'} SDUI in
  assert.notEqual(compactFit(value.career.assessment,career).reason,compactFit(assessment,funding).reason);
 });
 
-test('headline evidence alone does not unlock complete assessment or saving',()=>{
- const document=documentOf({about:false}),profile=readProfile(document,url,at)!;
- assert.equal(profile.anchors[0]?.kind,'headline');assert.equal(profile.profileReadAt,null);
- assert.equal(assessProfileGoals(uid,context,snapshot(document,url)).state,'unread');
+for(const marked of [false,true])test(`${marked?'verified':'markerless'} headline can suggest a funding conversation before lower sections exist`,()=>{
+ const document=documentOf({marked,headline:'Founder | Investor',about:false}),page=snapshot(document,url);
+ assert.equal(page.kind,'profile');if(page.kind!=='profile')throw Error('Expected a profile');
+ const profile=page.profile!;assert.equal(profile.anchors[0]?.kind,'headline');assert.equal(profile.profileReadAt,null);
+ const before=structuredClone(profile),result=assessProfileGoals(uid,context,page);
+ assert.equal(result.state,'ready');if(result.state!=='ready')throw Error('Expected provisional assessment');
+ assert.equal(result.basis,'headline');assert.equal(result.candidate.completeProfile,false);assert.equal(result.candidate.profileReadAt,null);
+ assert.ok(result.candidate.claims.filter(claim=>!['name','url'].includes(claim.field)).every(claim=>claim.field==='context'&&claim.sourceLabel==='Rendered profile · headline'));
+ for(const row of result.assessments){assert.equal(row.assessment.evidenceCoverage.supported,0);assert.ok(row.assessment.criteria.every(criterion=>criterion.status==='unknown'));assert.ok(row.assessment.contactRoutes.every(route=>route.provisional));}
+ const fundingResult=result.assessments.find(row=>row.goal.id===funding.id)!;
+ assert.equal(compactFit(fundingResult.assessment,funding).label,'Possible fit');
+ const card=compactProfile(document,{page,connected:true,userId:uid,goalContext:context,selectedGoalId:null,onSelect(){}});
+ assert.equal(card.querySelector('.goal-fit')?.getAttribute('data-goal-id'),funding.id);assert.equal(card.querySelector('.fit-label')?.textContent,'Possible fit');
+ assert.equal(canRequestBrief(profile),false);
+ const minimal=partialProfileProjection(profile)!;assert.ok(minimal);
+ const payload=inboxPayload({operationId:'44444444-4444-4444-a444-444444444444',userId:uid,profile:minimal,source:'rendered_profile'});
+ assert.equal(payload.profile_read_at,null);assert.equal(payload.snapshot.profileReadAt,null);assert.equal(payload.snapshot.anchors.length,1);
+ assert.deepEqual(profile,before,'Provisional assessment never rewrites the source as a complete profile.');
+});
+
+test('unmatched, aspirational and adjacent incomplete headlines remain uncertain rather than a negative fit',()=>{
+ for(const headline of ['Exploring investor roles','Former investor','Investor relations','Not an investor','Engineering interests']){
+  const document=documentOf({headline,about:false}),page=snapshot(document,url);
+  const card=compactProfile(document,{page,connected:true,userId:uid,goalContext:context,selectedGoalId:funding.id,onSelect(){}});
+  assert.equal(card.querySelector('.fit-label')?.textContent,'Not enough information');
+  assert.match(card.querySelector('.reason')?.textContent||'',/Only their headline is available/);
+ }
+});
+
+test('the partial path refuses blocked, stale, ambiguous, typed and oversize headline metadata',()=>{
+ const original=snapshot(documentOf({about:false}),url);assert.equal(original.kind,'profile');if(original.kind!=='profile')throw Error();
+ const profile=original.profile!,headline=profile.anchors[0];
+ const invalid=[{...original,state:'blocked' as const},{...original,state:'auth_required' as const},
+  {...original,profile:{...profile,truncated:true}}, {...original,profile:{...profile,truncationReasons:['subject_changed']}},
+  {...original,profile:{...profile,anchors:[]}}, {...original,profile:{...profile,anchors:[headline,headline]}},
+  {...original,profile:{...profile,anchors:[{...headline,sourceUrl:other+'#profile'}]}},
+  {...original,profile:{...profile,anchors:[{...headline,observedAt:'invalid'}]}},
+  {...original,profile:{...profile,anchors:[{...headline,field:'role' as const}]}},
+  {...original,profile:{...profile,anchors:[{...headline,text:'Investor '.repeat(10000)}]}},
+  snapshot(documentOf({about:false,summary:toolbar('Investor at Example Organization',other)}),url),
+  snapshot(documentOf({about:false}),other)];
+ for(const page of invalid)assert.equal(assessProfileGoals(uid,context,page).state,'unread');
+ for(const profile of [{...original.profile,anchors:[null]}, {...original.profile,truncationReasons:undefined},
+  {...original.profile,name:42}, {...original.profile,anchors:[{...headline,text:{}}]}]){
+  assert.equal(assessProfileGoals(uid,context,{...original,profile} as never).state,'unread','Malformed metadata is a read problem, not an account-goal error.');
+ }
+ assert.throws(()=>assessProfileGoals('99999999-9999-4999-a999-999999999999',context,original),/verified/);
+});
+
+test('partially hydrated lower sections cannot supply current roles or other typed criterion facts',()=>{
+ const document=documentOf({marked:true,about:false});
+ document.querySelector('[aria-label="Primary content"]')!.insertAdjacentHTML('beforeend','<section><h2>Experience</h2><div componentkey="Profile_Top_Level_ExperienceSectionanother-synthetic">CEO at Elsewhere</div></section>');
+ const page=snapshot(document,url),result=assessProfileGoals(uid,context,page);
+ assert.equal(result.state,'ready');if(result.state!=='ready')throw Error();
+ assert.equal(result.basis,'headline');assert.equal(result.candidate.completeProfile,false);
+ assert.ok(!result.candidate.claims.some(claim=>claim.text.includes('Elsewhere')||['role','company','industry','location'].includes(claim.field)));
+ const hydrated=assessProfileGoals(uid,context,snapshot(documentOf({about:true}),url));
+ assert.equal(hydrated.state,'ready');if(hydrated.state==='ready'){assert.equal(hydrated.basis,'profile');assert.equal(hydrated.candidate.completeProfile,true);}
 });
 
 test('unlabelled location, company and sidebar prose never substitute for the verified headline',()=>{

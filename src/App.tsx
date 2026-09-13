@@ -270,7 +270,7 @@ export default function App(){
     {page === 'Person' && (selectedPerson ? <>
      <button className="back-link" onClick={() => setPage('Relationships')}><ArrowLeft size={15}/>Relationships</button>
      <header className="person-heading"><Avatar name={selectedPerson.person} photoUrl={personPhotoUrl(selectedPerson)} size="large" tone={3}/><div><h1>{selectedPerson.person}</h1>{personHeadline(selectedPerson) && <p>{personHeadline(selectedPerson)}</p>}</div><StagePill stage={selectedPerson.stage}/></header>
-     <p className="person-meta">Saved {formatDate(selectedPerson.created_at)}{selectedPerson.profile ? ' · Profile read' : ' · Profile not read yet'}</p>
+     <p className="person-meta">Saved {formatDate(selectedPerson.created_at)}{selectedPerson.profile?.profileReadAt ? ' · Profile read' : selectedPerson.profile ? ' · Profile header saved' : ' · Profile not read yet'}</p>
      <div className="row-actions person-actions"><button className="button primary" onClick={() => setPersonTab('Updates')}><Plus size={15}/>Record an update</button>{selectedPerson.profile_url && <a className="button secondary" href={selectedPerson.profile_url} target="_blank" rel="noreferrer">LinkedIn<ExternalLink size={14}/></a>}</div>
      <section className="panel person-why"><p className="eyebrow muted">Why you saved them</p><p>{String(selectedPerson.context.saveReason || 'No reason recorded. Add one as a note.')}</p></section>
      <Tabs label="Person section" items={personTabs} value={personTab} onChange={setPersonTab}/>

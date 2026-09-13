@@ -52,7 +52,7 @@ test('changed goal version or content changes the context and assessment identit
   assert.equal(next.assessments[0].assessment.goalVersion,2);assert.equal(next.assessments[0].assessment.status,'unknown');
   const version=assessProfileGoals(uid,context([{...career,version:2}]),page());assert.equal(version.state,'ready');if(version.state==='ready')assert.notEqual(first.assessments[0].assessment.evidenceKey,version.assessments[0].assessment.evidenceKey);
 });
-test('no search snippet, fake ready snippet, truncated profile, or headline-only read is assessed', () => {
+test('search snippets, truncated snapshots and falsely complete profile reads are not assessed', () => {
   const search:PageSnapshot={kind:'search',state:'ready',message:'',results:[{name:'Investor',subtitle:'Seed London CEO',profileUrl:url,profileReadAt:null,truncated:false}]};
   for(const snapshot of [search,page({...profile(),anchors:[]}),page({...profile(),truncated:true}),page({...profile(),anchors:profile().anchors.slice(0,1)}),page({...profile(),profileReadAt:null})])assert.equal(assessProfileGoals(uid,context(),snapshot).state,'unread');
 });

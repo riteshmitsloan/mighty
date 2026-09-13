@@ -123,12 +123,17 @@ function titleStarts(segment: string, term: string): boolean {
   return alternatives(term).some(alias => segment === alias || segment.startsWith(alias + ' '));
 }
 function investorAuxiliary(value: string): boolean {
-  return /\binvestor (?:relations|services|communications|network|community|education|support|in people)\b|\b(?:vc|venture capitalist|venture partner|investment partner) (?:analyst|associate|intern|assistant|operations|services|research|relations|community|network)\b/.test(cachedTokens(value).join(' '));
+  return /\b(?:investor|vc|venture capitalist|venture partner|investment partner) (?:relations|services|communications|network|community|education|support|in people|analyst|associate|intern|assistant|operations|research|recruitment|recruiting|recruiter|events?|conference|podcast|newsletter|course|tools?|platform|solutions)\b/.test(cachedTokens(value).join(' '));
 }
+// Reviewed title modifiers may precede a literal investor title. They establish
+// only a possible contact route; never extract stage, sector or mandate fields.
+// No catch-all word prefix: "advisor to investors" and surrounding prose do not qualify.
+const investorQualifier = '(?:early stage|earlystage|pre seed stage|preseed stage|pre seed|preseed|seed stage|seed|growth stage|growth equity|growth|late stage|later stage|series a|series b|series c|technology|tech|deep tech|deeptech|climate tech|climatetech|climate|clean tech|cleantech|health care|healthcare|health tech|healthtech|biotech|life sciences|fintech|financial technology|enterprise|software|saas|b2b|b2c|consumer|industrial|real estate|impact|venture capital|venture|private equity|private|institutional|professional|sector)';
+const qualifiedInvestorTitle = new RegExp('^(?:' + investorQualifier + ' ){1,3}(?:investor|angel investor|venture capitalist|vc|venture partner|investment partner)(?: |$)');
 function explicitInvestorRole(value: string): boolean {
   const whole = cachedTokens(value).join(' ');
   return !unsafeRoleContext.test(whole) && !investorAuxiliary(value)
-    && titleSegments(value).some(segment => investorTerms.some(term => titleStarts(segment, term)));
+    && titleSegments(value).some(segment => investorTerms.some(term => titleStarts(segment, term)) || qualifiedInvestorTitle.test(segment));
 }
 function explicitSeniorRole(value: string, provisional = false): boolean {
   return !unsafeRoleContext.test(cachedTokens(value).join(' ')) && titleSegments(value).some(segment =>
