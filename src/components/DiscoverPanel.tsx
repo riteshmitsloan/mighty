@@ -10,10 +10,15 @@ import {
 } from '../lib/discover';
 import type { GatewayCall } from '../lib/platform';
 import './DiscoverPanel.css';
+import GoalShortlist from './GoalShortlist';
+import type {Goal} from '../lib/goals';
+import type {EvidenceClaim} from '../lib/evidence';
 
 export type DiscoverPanelProps = {
   focusRequest?: number;
   mode?: 'explore' | 'ask';
+  goal?: Goal|null;
+  selfEvidence?: readonly EvidenceClaim[];
   all: Connection[];
   strategy: string;
   employers: string[];
@@ -55,7 +60,7 @@ function messageOf(error: unknown): string {
 }
 
 export default function DiscoverPanel({
-  all, strategy, employers, savedUrls, call, onSave, onRemaining, focusRequest = 0, mode = 'explore',
+  all, strategy, employers, savedUrls, call, onSave, onRemaining, focusRequest = 0, mode = 'explore',goal=null,selfEvidence=[],
 }: DiscoverPanelProps) {
   const id = useId();
   const inputRef = useRef<HTMLInputElement>(null);
@@ -96,6 +101,8 @@ export default function DiscoverPanel({
     [savedUrls],
   );
   const hasQuery = Boolean(query.trim());
+  const goalConnections=useMemo(()=>hasQuery?matches.map(match=>match.person):all,[hasQuery,matches,all]);
+  const hasStructuredGoal=Boolean(goal);
 
   function isSaved(person: Connection): boolean {
     const url = profileURL(person.profile_url);
@@ -289,7 +296,7 @@ export default function DiscoverPanel({
       <div className="discover-answer-text">{answer.text}</div>
     </section>}
 
-    <section className="panel discover-results" aria-labelledby={id + '-local'}>
+    {hasStructuredGoal&&goal?<GoalShortlist key={goal.id} goal={goal} all={goalConnections} selfEvidence={selfEvidence} savedUrls={savedUrls} onSave={onSave} query={query}/>:<section className="panel discover-results" aria-labelledby={id + '-local'}>
       <div className="discover-section-heading">
         <div><h2 id={id + '-local'}>Your network</h2></div>
         {hasQuery && <span className="pill">{matches.length} {matches.length === 1 ? 'match' : 'matches'}</span>}
@@ -314,7 +321,7 @@ export default function DiscoverPanel({
               })}
             </ul>}
       {matches.length>100 && <p className="discover-muted">Showing the first 100 matches. Refine your words to narrow the full pool.</p>}
-    </section>
+    </section>}
 
     {web && <section className="panel discover-results" aria-labelledby={id + '-web'} aria-busy={busy === 'web'}>
       <div className="discover-section-heading">

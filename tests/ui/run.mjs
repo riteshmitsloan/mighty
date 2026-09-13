@@ -13,7 +13,7 @@ const appFile = await realpath(join(checkoutRoot, 'src', 'App.tsx'));
 const requireFromCheckout = createRequire(join(checkoutRoot, 'package.json'));
 const {build} = requireFromCheckout('esbuild');
 const outputDirectory = await mkdtemp(join(tmpdir(), 'mighty-ui-tests-'));
-const stubPaths=new Map(['./lib/local-sources','./lib/owner-handoff'].map(path=>[resolve(dirname(appFile),path),path]));
+const stubPaths=new Map(['./lib/local-sources','./lib/owner-handoff','./lib/goal-store','./lib/goal-local-update','./lib/device-goals','./lib/relationship-context'].map(path=>[resolve(dirname(appFile),path),path]));
 
 try {
   await build({
@@ -57,8 +57,17 @@ try {
   await build({entryPoints:[handoffPath],outfile:join(outputDirectory,'handoff.cjs'),bundle:true,platform:'node',format:'cjs'});
   const deviceTestFile=join(outputDirectory,'device-panel.test.cjs');
   await copyFile(new URL('./device-panel.test.cjs',import.meta.url),deviceTestFile);
+  await build({entryPoints:[join(checkoutRoot,'src/components/GoalsPanel.tsx'),join(checkoutRoot,'src/components/GoalSwitcher.tsx'),join(checkoutRoot,'src/lib/goals.ts')],outdir:outputDirectory,entryNames:'[name]',outExtension:{'.js':'.cjs'},bundle:true,platform:'node',format:'cjs',jsx:'automatic',packages:'external',loader:{'.css':'empty'}});
+  const goalsTestFile=join(outputDirectory,'goals.test.cjs');
+  await copyFile(new URL('./goals.test.cjs',import.meta.url),goalsTestFile);
+  await build({entryPoints:[join(checkoutRoot,'src/components/GoalShortlist.tsx')],outfile:join(outputDirectory,'shortlist.cjs'),bundle:true,platform:'node',format:'cjs',jsx:'automatic',packages:'external',loader:{'.css':'empty'}});
+  const shortlistTestFile=join(outputDirectory,'shortlist.test.cjs');
+  await copyFile(new URL('./shortlist.test.cjs',import.meta.url),shortlistTestFile);
+  await build({entryPoints:[join(checkoutRoot,'src/components/ConversationPanel.tsx')],outfile:join(outputDirectory,'ConversationPanel.cjs'),bundle:true,platform:'node',format:'cjs',jsx:'automatic',packages:'external',loader:{'.css':'empty'},plugins:[{name:'conversation-persistence-boundary',setup(builder){builder.onResolve({filter:/\/relationship-context$/},()=>({path:'context',namespace:'conversation-fixture'}));builder.onLoad({filter:/.*/,namespace:'conversation-fixture'},()=>({contents:'export const recordGoalInteraction=(...args)=>globalThis.__CONVERSATION_PANEL__.record(...args); export const saveMessageDraft=(...args)=>globalThis.__CONVERSATION_PANEL__.saveDraft(...args);',loader:'js'}));}}]});
+  const conversationTestFile=join(outputDirectory,'conversation.test.cjs');
+  await copyFile(new URL('./conversation.test.cjs',import.meta.url),conversationTestFile);
   const childStatus = await new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['--test', testFile, accountTestFile, deviceTestFile], {
+    const child = spawn(process.execPath, ['--test', testFile, accountTestFile, deviceTestFile, goalsTestFile, shortlistTestFile, conversationTestFile], {
       cwd: checkoutRoot,
       stdio: 'inherit',
       env: {

@@ -7,20 +7,23 @@ import type { MailboxWorkerResult } from './mbox.worker';
 import type { Connection } from './discover';
 import { readConnectionsData, readRelationshipData, savePersonData, updateStageData, finishImportData } from './data-access';
 import { localSources, keepLocal } from './local-sources';
+import {readAccountSourceData, type AccountSourceFacts} from './account-sources';
+import {readLocalRelationships,updateLocalRelationships,insertLocalPerson,insertLocalCapture} from './local-relationships';
 export { localSources, keepLocal } from './local-sources';
 
 export interface Person { id:string;person:string;profile_url:string|null;stage:string;context:Record<string,unknown>;created_at:string; profile?:Record<string,unknown> }
-export interface Capture { id:string;relationship_id:string;kind:string;body:string;related_event_id:string|null;created_at:string }
-export interface LocalSources { archive?:ArchiveResult;resume?:ResumeExtraction;mailbox?:MailboxWorkerResult;strategy?:string;knowledge?:KnowledgeState }
+export interface Capture { id:string;relationship_id:string;kind:string;body:string;related_event_id:string|null;created_at:string;user_id?:string;goal_id?:string|null;goal_version?:number|null;request_id?:string|null;due_at?:string|null }
+export interface LocalSources { archive?:ArchiveResult;resume?:ResumeExtraction;mailbox?:MailboxWorkerResult;strategy?:string;knowledge?:KnowledgeState;accountFacts?:AccountSourceFacts }
 export function canonicalProfile(value:string){if(!value.trim())return null;let url:URL;try{url=new URL(/^https?:/i.test(value)?value:`https://${value}`);}catch{throw Error('Enter a LinkedIn profile, such as linkedin.com/in/your-name.');}if(!['www.linkedin.com','linkedin.com'].includes(url.hostname)||!/^\/in\/[^/?#]+\/?$/.test(url.pathname))throw Error('Use a LinkedIn profile link.');return `https://www.linkedin.com${url.pathname.replace(/\/$/,'')}/`;}
 export function archiveConnections(archive?:ArchiveResult):Connection[]{return archive?.connections.map(p=>({person:`${p.firstName} ${p.lastName}`.trim(),profile_url:p.url,company:p.company,position:p.position,connectedOn:p.connectedOn,companyOverlap:companyOverlapFor(archive.companyIndex,p.company)}))||[];}
 export async function allConnections(uid:string){await accountId(uid);const rows=await readConnectionsData(db!,uid);await accountId(uid);return rows;}
-export async function readRelationships(uid:string){await accountId(uid);const result=await readRelationshipData(db!,uid);await accountId(uid);return result;}
+export async function accountSources(uid:string){await accountId(uid);const facts=await readAccountSourceData(db!,uid);await accountId(uid);return facts;}
+export async function readRelationships(uid:string|null){if(!uid){const {people,events}=await readLocalRelationships();return {people,events};}await accountId(uid);const result=await readRelationshipData(db!,uid);await accountId(uid);return result;}
 export async function savePerson(expectedUid:string|null,input:import('./data-access').PersonInput){
- const uid=await accountId(expectedUid);const profileUrl=canonicalProfile(input.url||'');return savePersonData(db!,uid,input,profileUrl);
+ const profileUrl=canonicalProfile(input.url||'');if(expectedUid===null)return updateLocalRelationships(state=>insertLocalPerson(state,input,profileUrl));const uid=await accountId(expectedUid);return savePersonData(db!,uid,input,profileUrl);
 }
-export async function capture(expectedUid:string|null,personId:string,kind:string,body='',relatedId?:string){const uid=await accountId(expectedUid);const {error}=await db!.from('outreach_events').insert({user_id:uid,relationship_id:personId,kind,body:cleanText(body),related_event_id:relatedId||null});if(error)throw Error(error.message);}
-export async function changeStage(expectedUid:string|null,personId:string,stage:string){const uid=await accountId(expectedUid);await updateStageData(db!,uid,personId,stage);}
+export async function capture(expectedUid:string|null,personId:string,kind:string,body='',relatedId?:string){if(expectedUid===null)return updateLocalRelationships(state=>insertLocalCapture(state,personId,kind,body,relatedId));const uid=await accountId(expectedUid);const {error}=await db!.from('outreach_events').insert({user_id:uid,relationship_id:personId,kind,body:cleanText(body),related_event_id:relatedId||null});if(error)throw Error(error.message);}
+export async function changeStage(expectedUid:string|null,personId:string,stage:string){if(!['saved','contacted','in_conversation','staying_in_touch'].includes(stage))throw Error('Choose a supported relationship stage.');if(expectedUid===null)return updateLocalRelationships(state=>{const person=state.people.find(person=>person.id===personId);if(!person)throw Error('This person could not be updated.');person.stage=stage;});const uid=await accountId(expectedUid);await updateStageData(db!,uid,personId,stage);}
 
 async function saveSource(uid:string,source:string,fingerprint:string,facts:unknown){const {error}=await db!.from('knowledge_sources').upsert({user_id:uid,source,fingerprint,facts},{onConflict:'user_id,source,fingerprint',ignoreDuplicates:true});if(error)throw Error(error.message);}
 export async function saveResume(expectedUid:string|null,resume:ResumeExtraction){const uid=await accountId(expectedUid);await saveSource(uid,'resume',resume.fingerprint,{text:cleanText(resume.text),pages:resume.pages});}

@@ -19,10 +19,11 @@ const click=async t=>{const e=typeof t==='string'?button(t):t;assert.ok(e,`Butto
 const input=async(e,value)=>{assert.ok(e);await act(async()=>{props(e).onChange({target:{value}});await tick();});};
 const text=()=>document.body.textContent;
 const person=(id,name,url=null)=>({id,person:name,profile_url:url,stage:'saved',context:{},created_at:'2026-09-12T12:00:00Z'});
-const archive=(count=1)=>({verifiedAccountHolder:{fullName:'Fixture Owner'},layer1:{positions:[],education:[],skills:[],importedAt:'2026-09-12T00:00:00Z'},counts:{connections:count,positions:0,threads:0,receivedMessages:2,skills:0},connections:[{firstName:'Fixture',lastName:'Contact',url:'https://www.linkedin.com/in/mighty-ui-test-connection/',company:'Example Test Company',position:'Engineer'}],writingSamples:[],warnings:[]});
+const archive=(count=1)=>({verifiedAccountHolder:{fullName:'Fixture Owner'},layer1:{id:'fixture',fingerprint:'fixture',profile:[],positions:[],education:[],skills:[],importedAt:'2026-09-12T00:00:00Z'},counts:{connections:count,positions:0,threads:0,receivedMessages:2,skills:0},connections:[{firstName:'Fixture',lastName:'Contact',url:'https://www.linkedin.com/in/mighty-ui-test-connection/',company:'Example Test Company',position:'Engineer'}],writingSamples:[],warnings:[]});
 beforeEach(()=>{
  const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
- Object.assign(global,{window,document:window.document,HTMLElement:window.HTMLElement,Event:window.Event,localStorage:{getItem:()=>null,setItem(){}},IS_REACT_ACT_ENVIRONMENT:true});
+ const storage=new Map();
+ Object.assign(global,{window,document:window.document,HTMLElement:window.HTMLElement,Event:window.Event,localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key),key:n=>[...storage.keys()][n],get length(){return storage.size}},IS_REACT_ACT_ENVIRONMENT:true});
  window.HTMLElement.prototype.showModal=function(){this.setAttribute('open','');};window.HTMLElement.prototype.close=function(){this.removeAttribute('open');};
  s=global.__MIGHTY_UI_TEST__={uid:'user-a',authListeners:new Set(),localWrites:[],settings:async()=>({data:{data:{strategy:'Server goal'}},error:null}),localSources:async()=>({}),allConnections:async()=>[],readRelationships:async()=>({people:[],events:[]}),saveSettings:async()=>{},savePerson:async()=> 'saved-id',capture:async()=>{},gateway:async()=>{throw Error('Unexpected gateway call')},readArchive:async()=>archive(),readResume:async()=>({text:'resume',pages:1})};
  container=document.getElementById('root');root=createRoot(container);
@@ -36,8 +37,8 @@ test('goal typed before delayed hydration survives the server and local replies'
  const local=deferred(),server=deferred();s.localSources=()=>local.promise;s.settings=()=>server.promise;await boot();await openGoal();
  await input(document.querySelector('textarea'),'My unsaved typed goal');
  await act(async()=>{local.resolve({strategy:'Old local goal'});server.resolve({data:{data:{strategy:'Old server goal'}},error:null});await tick();});
- assert.equal(document.querySelector('textarea').value,'My unsaved typed goal');assert.deepEqual(s.localWrites.at(-1),{key:'user-a',patch:{strategy:'My unsaved typed goal'}});
- await input(document.querySelector('textarea'),'');assert.equal(document.querySelector('textarea').value,'');assert.deepEqual(s.localWrites.at(-1),{key:'user-a',patch:{strategy:''}});
+ assert.equal(document.querySelector('textarea').value,'My unsaved typed goal');assert.equal(s.localWrites.length,0,'Structured goal typing never rewrites imported sources.');
+ await input(document.querySelector('textarea'),'');assert.equal(document.querySelector('textarea').value,'');assert.equal(s.localWrites.length,0);
 });
 
 test('account switch hides old sources, people and the old account goal',async()=>{
@@ -45,7 +46,7 @@ test('account switch hides old sources, people and the old account goal',async()
  s.readRelationships=async uid=>({people:[person(uid,uid==='user-a'?'Private A Person':'Private B Person')],events:[]});await boot();assert.match(text(),/Private A Person/);
  await openGoal();await input(document.querySelector('textarea'),'A draft before switch');await switchAccount('user-b');
  assert.doesNotMatch(text(),/Private A Person|Fixture Owner|A draft before switch/);assert.match(text(),/Private B Person/);await openGoal();assert.equal(document.querySelector('textarea').value,'Private B goal');
- assert.ok(s.localWrites.some(w=>w.key==='user-a'&&w.patch.strategy==='A draft before switch'));
+ await switchAccount('user-a');await openGoal();assert.equal(document.querySelector('textarea').value,'A draft before switch');
 });
 
 test('an archive completed after account switching remains pinned to its original local account',async()=>{
@@ -135,22 +136,15 @@ test('an explicitly copied device goal is saved with its sources only after Save
  assert.match(text(),/Sources saved to your account/);
 });
 
-test('Save goal accepts an explicit empty string and clears the connected account goal',async()=>{
- const writes=[];
+test('clearing an outcome preserves the existing goal until a valid edit or explicit pause is saved',async()=>{
  s.settings=async()=>({data:{data:{strategy:'Existing saved goal'}},error:null});
- s.saveSettings=async(patch,uid)=>writes.push({patch,uid});
- await boot();await openGoal();assert.equal(document.querySelector('textarea').value,'Existing saved goal');
- await input(document.querySelector('textarea'),'');
- assert.equal(button('Save goal').disabled,false,'A cleared goal must remain saveable.');
- assert.deepEqual(s.localWrites.at(-1),{key:'user-a',patch:{strategy:''}});
- assert.equal(writes.length,0,'Typing must not silently write account settings.');
- const form=document.querySelector('.goal-editor form');
- await act(async()=>{props(form).onSubmit({preventDefault(){}});await tick();});
- assert.deepEqual(writes,[{patch:{strategy:''},uid:'user-a'}]);
- assert.equal(document.querySelector('textarea').value,'');assert.match(text(),/Your goal is saved/);
+ await boot();await openGoal();await input(document.querySelector('textarea'),'');
+ const form=document.querySelector('.goal-detail-form');await act(async()=>{props(form).onSubmit({preventDefault(){}});await tick();});
+ assert.match(text(),/Add a name and the outcome/);assert.equal(s.goalRecords.get('user-a').goals[0].outcome,'Existing saved goal');
+ assert.equal(document.querySelector('textarea').value,'');assert.equal(s.localWrites.length,0);
 });
 
-test('newer goal typing survives deferred handoff completion and is used by the later account save',async()=>{
+test('newer structured goal typing survives a deferred legacy handoff and source saving',async()=>{
  const completion=deferred();
  const device={archive:archive(),strategy:'Older goal from device copy'};
  const writes=[];let copiedPreview;
@@ -164,10 +158,11 @@ test('newer goal typing survives deferred handoff completion and is used by the 
  await boot();await click('Me');await click("Things you've learned");await click('Review device files');await click('Use selected files');
  assert.ok(copiedPreview);await click('Goal');
  await input(document.querySelector('textarea'),'Newer goal typed while the handoff finishes');
- assert.deepEqual(s.localWrites.at(-1),{key:'user-a',patch:{strategy:'Newer goal typed while the handoff finishes'}});
+ assert.equal(s.localWrites.length,0,'Typing must not write the source record.');
  await act(async()=>{completion.resolve({destinationUid:copiedPreview.destinationUid,fields:copiedPreview.fields,fingerprint:copiedPreview.fingerprint,snapshot:device});await tick();});
  await click('Goal');assert.equal(document.querySelector('textarea').value,'Newer goal typed while the handoff finishes');
  assert.equal(writes.length,0);
  await click("Things you've learned");await click('Save to account');
- assert.deepEqual(writes,[{patch:{strategy:'Newer goal typed while the handoff finishes'},uid:'user-a'}]);
+ assert.deepEqual(writes,[{patch:{strategy:'Older goal from device copy'},uid:'user-a'}]);
+ await click('Goal');assert.equal(document.querySelector('textarea').value,'Newer goal typed while the handoff finishes');
 });

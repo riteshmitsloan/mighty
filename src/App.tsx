@@ -4,7 +4,7 @@ import {db,gatewayForAccount,saveSettings,authCallbackNotice} from './lib/platfo
 import {readLinkedInArchive,type ArchiveProgress} from './lib/archive';
 import {extractResumePdf} from './lib/resume';
 import workerSrc from 'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url';
-import {allConnections,archiveConnections,capture,changeStage,keepLocal,localSources,readRelationships,saveArchive,savePerson,saveResume,saveMailbox,savedArchiveBlob,synthesizer,type Capture,type LocalSources,type Person} from './lib/workspace';
+import {accountSources,allConnections,archiveConnections,capture,changeStage,keepLocal,localSources,readRelationships,saveArchive,savePerson,saveResume,saveMailbox,savedArchiveBlob,synthesizer,type Capture,type LocalSources,type Person} from './lib/workspace';
 import {watchInbox} from './lib/inbox';
 import type {MboxWorkerResponse,MailboxWorkerResult} from './lib/mbox.worker';
 import {startExtensionBridge} from './lib/extension-bridge';
@@ -15,6 +15,13 @@ import RelationshipViews,{personHeadline,Timeline,type RelationshipView} from '.
 import MePanel,{type MeTab} from './components/MePanel';
 import AccountPanel from './components/AccountPanel';
 import DeviceSourcesPanel from './components/DeviceSourcesPanel';
+import GoalsPanel from './components/GoalsPanel';
+import GoalSwitcher from './components/GoalSwitcher';
+import PersonEvidencePanel from './components/PersonEvidencePanel';
+import DeviceGoalsPanel from './components/DeviceGoalsPanel';
+import {useGoals} from './lib/use-goals';
+import {buildSelfEvidence} from './lib/evidence';
+import {completeRelationshipCommitment,openGoalCommitments} from './lib/relationship-events';
 import {copyDeviceHandoff,type HandoffPreview} from './lib/owner-handoff';
 const personTabs=['Context','Updates','History'] as const;
 const stages=['saved','contacted','in_conversation','staying_in_touch'];
@@ -24,6 +31,7 @@ export default function App(){
  const [page,setPage]=useState<string>(authCallbackNotice?'Me':'Today'),[uid,setUid]=useState<string|null>(null),[ready,setReady]=useState(false),[sources,setSources]=useState<LocalSources>({}),[pool,setPool]=useState<Connection[]>([]),[people,setPeople]=useState<Person[]>([]),[events,setEvents]=useState<Capture[]>([]),[strategy,setStrategy]=useState(''),[notice,setNotice]=useState(authCallbackNotice||''),[busy,setBusy]=useState(''),[progress,setProgress]=useState(''),[remaining,setRemaining]=useState<number|null>(null),[modal,setModal]=useState(false),[selected,setSelected]=useState(''),[noteDrafts,setNoteDrafts]=useState<Record<string,{body:string;kind:string}>>({}),[refreshPending,setRefreshPending]=useState(false);
  const [extensionId,setExtensionId]=useState(()=>localStorage.getItem('mighty-extension-id')||''),[extensionStatus,setExtensionStatus]=useState('Not connected'),[ownEmail,setOwnEmail]=useState('');
  const [accountEmail,setAccountEmail]=useState('');
+ const [loadedSourcesKey,setLoadedSourcesKey]=useState('');
  const [relationshipView,setRelationshipView]=useState<RelationshipView>('List');
  const [meTab,setMeTab]=useState<MeTab>(authCallbackNotice?'Settings':'Profile');
  const [personTab,setPersonTab]=useState<typeof personTabs[number]>('Context');
@@ -39,14 +47,16 @@ export default function App(){
  const [exploreFocus,setExploreFocus]=useState(0);
  const mailboxWorker=useRef<Worker|null>(null);
  const key=uid||'device-draft';
+ const goals=useGoals(key,uid,ready&&loadedSourcesKey===key,strategy);
+ const activeStrategy=goals.activeGoal?.outcome||strategy;
  const localKey=useRef(key);const accountGeneration=useRef(0);const renderGeneration=accountGeneration.current;
  const actionLock=useRef(false);const goalDirty=useRef(false);const refreshGeneration=useRef(0);
  const goalEditVersion=useRef(0);
  const isCurrent=()=>localKey.current===key&&accountGeneration.current===renderGeneration;
  const refresh=useCallback(async()=>{
-  if(!uid||localKey.current!==uid||accountGeneration.current!==renderGeneration)return;
+  if(localKey.current!==key||accountGeneration.current!==renderGeneration)return;
   const request=++refreshGeneration.current;const result=await readRelationships(uid);
-  if(localKey.current!==uid||accountGeneration.current!==renderGeneration||request!==refreshGeneration.current)return;
+  if(localKey.current!==key||accountGeneration.current!==renderGeneration||request!==refreshGeneration.current)return;
   setPeople(result.people);setEvents(result.events);
  },[uid,renderGeneration]);
  useEffect(()=>{
@@ -57,7 +67,7 @@ export default function App(){
    const nextKey=nextUid||'device-draft';
    if(localKey.current!==nextKey){
     localKey.current=nextKey;accountGeneration.current++;goalDirty.current=false;
-    setPeople([]);setEvents([]);setPool([]);setSources({});setStrategy('');setSelected('');setNoteDrafts({});setRefreshPending(false);setModal(false);setCaptureOpen(false);setPage('Today');setRemaining(null);setOwnEmail('');setNotice('');setProgress('');
+    setPeople([]);setEvents([]);setPool([]);setSources({});setStrategy('');setLoadedSourcesKey('');setSelected('');setNoteDrafts({});setRefreshPending(false);setModal(false);setCaptureOpen(false);setPage('Today');setRemaining(null);setOwnEmail('');setNotice('');setProgress('');
    }
    setUid(nextUid);setAccountEmail(email);setReady(true);
   };
@@ -74,15 +84,17 @@ export default function App(){
    const stored=local.status==='fulfilled'?local.value:{};
    const remoteValue=remote.status==='fulfilled'?remote.value:null;
    // Preserve imports or edits made while either store was loading.
-   setSources(currentSources=>({...stored,...currentSources}));
+   setSources(currentSources=>({...stored,...(remoteValue?.data?.data?.knowledge?{knowledge:remoteValue.data.data.knowledge}:{}),...currentSources}));
    if(!goalDirty.current)setStrategy(typeof stored.strategy==='string'?stored.strategy:remoteValue?.data?.data?.strategy||'');
+   setLoadedSourcesKey(key);
    const error=local.status==='rejected'?local.reason:remote.status==='rejected'?remote.reason:remoteValue?.error;
    if(error)setNotice(message(error instanceof Error?error:Error(error.message||String(error))));
   });
   if(uid){
+   void accountSources(uid).then(accountFacts=>{if(current())setSources(previous=>({...previous,accountFacts}));}).catch(e=>{if(current())setNotice(message(e));});
    void allConnections(uid).then(connections=>{if(current())setPool(connections);}).catch(e=>{if(current())setNotice(message(e));});
-   void refresh().catch(e=>{if(current())setNotice(message(e));});
   }
+  void refresh().catch(e=>{if(current())setNotice(message(e));});
   return()=>{active=false;};
  },[key,uid,ready,refresh,renderGeneration]);
  useEffect(()=>{if(!uid)return;return watchInbox(result=>{if(!isCurrent())return;if(result.saved){void refresh().catch(e=>{if(isCurrent())setNotice(message(e));});setNotice(`${result.saved} ${result.saved===1?'person':'people'} received from your extension.`);}if(result.failed)setNotice(`${result.failed} extension saves are still pending and will retry on focus.`);},e=>{if(isCurrent())setNotice(e.message);},uid);},[uid,refresh]);
@@ -109,14 +121,15 @@ export default function App(){
    const result=await copyDeviceHandoff(preview);
    if(!isCurrent()||result.destinationUid!==uid)return;
    setSources(current=>({...current,...result.snapshot}));
-   if(typeof result.snapshot.strategy==='string'&&goalEditVersion.current===goalVersion){goalDirty.current=true;setStrategy(result.snapshot.strategy);}
+   if(typeof result.snapshot.strategy==='string'&&goalEditVersion.current===goalVersion){goalDirty.current=true;setStrategy(result.snapshot.strategy);await goals.importStrategy(result.snapshot.strategy);}
    copied=true;setNotice('Your selected files are available here. Use Save to account to store them online.');
    setPage('Me');setMeTab("Things you've learned");
   });
   return copied;
  };
  const connections=useMemo(()=>sources.archive?archiveConnections(sources.archive):pool,[sources.archive,pool]);
- const employers=useMemo(()=>sources.archive?.layer1.positions.map(p=>p['Company Name']||p.Company||'').filter(Boolean)||[],[sources.archive]);
+ const selfEvidence=useMemo(()=>buildSelfEvidence(sources),[sources]);
+ const employers=useMemo(()=>(sources.archive||sources.accountFacts?.archive)?.layer1.positions.map(p=>p['Company Name']||p.Company||'').filter(Boolean)||[],[sources.archive,sources.accountFacts]);
  const savedUrls=useMemo(()=>new Set(people.map(p=>p.profile_url).filter((s):s is string=>!!s)),[people]);
  const selectedPerson=people.find(p=>p.id===selected);const selectedEvents=events.filter(e=>e.relationship_id===selected);
  const newPerson=async(p:Connection,reason:string)=>{if(!isCurrent())throw Error('Your account changed. Please try again.');await savePerson(uid,{person:p.person,url:p.profile_url,reason,company:p.company,position:p.position||p.role,source:p.context?.source==='web_search'?'web_search':'discovery',searchHeadline:typeof p.context?.searchHeadline==='string'?p.context.searchHeadline:undefined,searchSnippet:typeof p.context?.searchSnippet==='string'?p.context.searchSnippet:undefined});await refreshAfterWrite(`${p.person} saved.`);};
@@ -155,11 +168,11 @@ export default function App(){
   await refreshAfterWrite('Update saved.');
  });
  const updateStage = (personId: string, stage: string) => run('Updating stage', async () => {await changeStage(uid, personId, stage); await refreshAfterWrite('Stage saved.');});
- const keepPromise = (event: Capture) => run('Keeping promise', async () => {await capture(uid, event.relationship_id, 'promise_kept', '', event.id); await refreshAfterWrite('Promise marked kept.');});
+ const completeReminder = (event: Capture) => run('Completing next step', async () => {await completeRelationshipCommitment(uid,event); await refreshAfterWrite(event.kind==='next_step'?'Next step marked complete.':'Promise marked kept.');});
  const personName = sources.archive?.verifiedAccountHolder?.fullName || '';
  const firstName = personName.trim().split(/\s+/)[0];
  const greeting = new Date().getHours() < 12 ? 'Good morning' : new Date().getHours() < 18 ? 'Good afternoon' : 'Good evening';
- const openPromise = events.find(event => event.kind === 'promise_made' && !events.some(other => other.related_event_id === event.id) && people.some(person => person.id === event.relationship_id));
+ const openPromise = openGoalCommitments(events,{activeGoalId:goals.activeGoal?.id??null,relationshipIds:new Set(people.map(person=>person.id))})[0];
  const featuredPerson = people.find(person => person.id === openPromise?.relationship_id) || people[0];
  const otherPeople = people.filter(person => person.id !== featuredPerson?.id).slice(0, 4);
  const captureForm = <CaptureForm people={people} selected={selected} setSelected={selectDraftPerson} note={note} setNote={setNote} kind={noteKind} setKind={setNoteKind} disabled={Boolean(busy)} onSave={saveCapture}/>;
@@ -185,20 +198,21 @@ export default function App(){
     {!uid && ready && !(page==='Me'&&meTab==='Settings') && <div className="account-entry"><span className="muted small">Local workspace</span><button type="button" className="text-button" disabled={Boolean(busy)} onClick={()=>openMe('Settings')}>Sign in<ArrowRight size={14}/></button></div>}
     {notice && <div className="notice" role="status"><span>{notice}</span>{refreshPending && <button type="button" className="text-button" disabled={Boolean(busy)} onClick={() => void retryRefresh()}>Refresh list</button>}<button className="icon-button" aria-label="Dismiss notice" onClick={() => setNotice('')}><X size={16}/></button></div>}
     {busy && <div className="import-progress" role="status"><span className="busy-dot"/><strong>{busy}</strong>{progress && <span>{progress}</span>}</div>}
+    {['Today','Explore','Person'].includes(page)&&<GoalSwitcher key={key} {...goals.workspace} onSelect={goals.select} busy={goals.busy}/>}
     {page === 'Today' && <>
      <header className="today-heading"><h1>{greeting}{firstName ? `, ${firstName}` : ''}.</h1></header>
      <section className="start-card">
       {featuredPerson ? <Avatar name={featuredPerson.person} tone={1}/> : <span className="start-symbol"><Users size={23}/></span>}
-      <div><p className="eyebrow">{openPromise ? 'Open promise' : featuredPerson ? 'Recently saved' : 'Start here'}</p><h2>{openPromise ? featuredPerson.person : featuredPerson ? featuredPerson.person : connections.length ? 'Find your next connection.' : 'Start with your network.'}</h2><p>{openPromise?.body || (featuredPerson ? String(featuredPerson.context.saveReason || 'No reason recorded yet.') : connections.length ? 'Search your connections by role or company.' : uid ? 'Import sources or use the files already in this browser.' : 'Import your LinkedIn archive to explore your connections.')}</p></div>
+      <div><p className="eyebrow">{openPromise ? (openPromise.kind==='next_step'?'Open next step':'Open promise') : featuredPerson ? 'Recently saved' : 'Start here'}</p><h2>{openPromise ? featuredPerson.person : featuredPerson ? featuredPerson.person : connections.length ? 'Find your next connection.' : 'Start with your network.'}</h2><p>{openPromise?.body || (featuredPerson ? String(featuredPerson.context.saveReason || 'No reason recorded yet.') : connections.length ? 'Search your connections by role or company.' : uid ? 'Import sources or use the files already in this browser.' : 'Import your LinkedIn archive to explore your connections.')}</p></div>
       <button className="button primary" onClick={() => featuredPerson ? selectPerson(featuredPerson) : connections.length ? openExplore() : openMe("Things you've learned")}>{featuredPerson ? 'Open context' : connections.length ? 'Explore network' : uid ? 'Choose sources' : 'Import archive'}</button>
      </section>
      <div className="today-prompts">{!connections.length && <button className="button secondary" onClick={openExplore}>Explore</button>}{people.length > 0 && <button className="button secondary" onClick={() => setCaptureOpen(true)}>Record an update</button>}</div>
      {otherPeople.length > 0 && <section className="today-next"><div className="section-heading"><h2 className="eyebrow muted">{otherPeople.length ? 'Keep in mind' : 'Recent activity'}</h2>{otherPeople.length > 0 && <button className="text-button" onClick={() => setPage('Relationships')}>View all<ArrowRight size={13}/></button>}</div>{otherPeople.length ? otherPeople.map((person, index) => <button className="today-row" key={person.id} onClick={() => selectPerson(person)}><Avatar name={person.person} size="small" tone={index}/><span><strong>{person.person}</strong><span>{String(person.context.saveReason || personHeadline(person) || 'Saved by you')}</span></span><ChevronRight size={16}/></button>) : <div className="quiet-empty"><span className="quiet-line"/><p>{featuredPerson ? 'No other saved people.' : 'No activity captured yet.'}</p></div>}</section>}
-     <section className="strategy-summary"><div><button className="eyebrow text-button" onClick={() => openMe('Goal')}>{strategy ? 'Your goal' : 'Set a goal'}</button><p>{strategy || 'Set a goal to guide who you look for.'}</p></div><button className="icon-button" aria-label="Edit your goal" onClick={() => openMe('Goal')}><ArrowRight size={18}/></button></section>
+     <section className="strategy-summary"><div><button className="eyebrow text-button" onClick={() => openMe('Goal')}>{goals.activeGoal?.title || (strategy ? 'Your goal' : 'Set a goal')}</button><p>{activeStrategy || 'Set a goal to guide who you look for.'}</p></div><button className="icon-button" aria-label="Edit your goal" onClick={() => openMe('Goal')}><ArrowRight size={18}/></button></section>
     </>}
-    {page === 'Relationships' && <RelationshipViews key={key} people={people} events={events} strategy={strategy} view={relationshipView} onView={setRelationshipView} busy={Boolean(busy)} onOpen={selectPerson} onAdd={() => setModal(true)} onExplore={openExplore} onStage={updateStage}/>}
-    {page === 'Explore' && <><header className="page-heading"><p className="eyebrow">Explore</p><h1>{exploreMode === 'ask' ? 'What’s on your mind?' : 'Who should I know?'}</h1></header><DiscoverPanel key={key} all={connections} strategy={strategy} employers={employers} savedUrls={savedUrls} call={gatewayForAccount(uid)} onSave={newPerson} onRemaining={value => {if (isCurrent()) setRemaining(value);}} focusRequest={exploreFocus} mode={exploreMode}/></>}
-    {page === 'Me' && <MePanel key={key} tab={meTab} onTab={setMeTab} sources={sources} people={people} connectionCount={connections.length} strategy={strategy} onStrategy={editStrategy} onSaveStrategy={saveStrategy} onExplore={openExplore} devicePanel={uid?<DeviceSourcesPanel key={uid} uid={uid} busy={Boolean(busy)} onCopy={useDeviceSources}/>:null} accountPanel={<AccountPanel client={db} uid={uid} email={accountEmail} busy={Boolean(busy)} ready={ready}/>} uid={uid} busy={Boolean(busy)} ownEmail={ownEmail} onOwnEmail={setOwnEmail} onArchive={importArchive} onResume={importResume} onMailbox={importMailbox} onRebuild={rebuildArchive} onSync={syncSources} extensionId={extensionId} extensionStatus={extensionStatus} onExtensionId={value => {setExtensionId(value); localStorage.setItem('mighty-extension-id', value);}}/>}
+    {page === 'Relationships' && <RelationshipViews key={key} goals={goals.workspace.goals} onComplete={completeReminder} people={people} events={events} strategy={activeStrategy} view={relationshipView} onView={setRelationshipView} busy={Boolean(busy)} onOpen={selectPerson} onAdd={() => setModal(true)} onExplore={openExplore} onStage={updateStage}/>}
+    {page === 'Explore' && <><header className="page-heading"><p className="eyebrow">Explore</p><h1>{exploreMode === 'ask' ? 'What’s on your mind?' : 'Who should I know?'}</h1></header><DiscoverPanel key={key} goal={goals.activeGoal} selfEvidence={selfEvidence} all={connections} strategy={activeStrategy} employers={employers} savedUrls={savedUrls} call={gatewayForAccount(uid)} onSave={newPerson} onRemaining={value => {if (isCurrent()) setRemaining(value);}} focusRequest={exploreFocus} mode={exploreMode}/></>}
+    {page === 'Me' && <MePanel goalsPanel={<>{uid&&<DeviceGoalsPanel key={uid} uid={uid} busy={goals.busy} onCopied={()=>goals.adoptCopiedWorkspace()}/>}{goals.conflicts.map(conflict=><section key={conflict.goalId} className="panel content-panel"><h2>Two versions of {conflict.local.title}</h2><p>Your version: {conflict.local.outcome}</p><p>Account version: {conflict.remote.outcome}</p><div className="row-actions"><button className="button secondary" onClick={()=>void goals.resolve(conflict.goalId,'local')}>Keep my version</button><button className="button secondary" onClick={()=>void goals.resolve(conflict.goalId,'remote')}>Use account version</button></div></section>)}<GoalsPanel key={key} draftKey={key} {...goals.workspace} onSelect={goals.select} onSave={goals.save} notice={goals.notice} busy={goals.busy}/></>} key={key} tab={meTab} onTab={setMeTab} sources={sources} people={people} connectionCount={connections.length} strategy={strategy} onStrategy={editStrategy} onSaveStrategy={saveStrategy} onExplore={openExplore} devicePanel={uid?<DeviceSourcesPanel key={uid} uid={uid} busy={Boolean(busy)} onCopy={useDeviceSources}/>:null} accountPanel={<AccountPanel client={db} uid={uid} email={accountEmail} busy={Boolean(busy)} ready={ready}/>} uid={uid} busy={Boolean(busy)} ownEmail={ownEmail} onOwnEmail={setOwnEmail} onArchive={importArchive} onResume={importResume} onMailbox={importMailbox} onRebuild={rebuildArchive} onSync={syncSources} extensionId={extensionId} extensionStatus={extensionStatus} onExtensionId={value => {setExtensionId(value); localStorage.setItem('mighty-extension-id', value);}}/>}
     {page === 'Person' && (selectedPerson ? <>
      <button className="back-link" onClick={() => setPage('Relationships')}><ArrowLeft size={15}/>Relationships</button>
      <header className="person-heading"><Avatar name={selectedPerson.person} size="large" tone={3}/><div><h1>{selectedPerson.person}</h1>{personHeadline(selectedPerson) && <p>{personHeadline(selectedPerson)}</p>}</div><StagePill stage={selectedPerson.stage}/></header>
@@ -207,9 +221,10 @@ export default function App(){
      <section className="panel person-why"><p className="eyebrow muted">Why you saved them</p><p>{String(selectedPerson.context.saveReason || 'No reason recorded. Add one as a note.')}</p></section>
      <Tabs label="Person section" items={personTabs} value={personTab} onChange={setPersonTab}/>
      <div className="person-tab-content">
-      {personTab === 'Context' && <div className="person-context-grid"><section className="panel content-panel">{selectedPerson.profile ? <><h2>Profile context</h2><ProfileEvidence profile={selectedPerson.profile}/></> : <><h2>Profile not read yet.</h2>{typeof selectedPerson.context.searchSnippet === 'string' && <div className="search-context"><p className="eyebrow muted">From search · unverified</p><p>{selectedPerson.context.searchSnippet}</p></div>}<p>Open this profile with the Mighty extension, then save it.</p><details><summary>Why no brief yet?</summary><p>Briefs need a complete profile read. Search snippets are incomplete.</p></details></>}</section><section className="panel content-panel"><p className="eyebrow">Your relationship</p><label htmlFor="stage">Relationship stage</label><select id="stage" value={selectedPerson.stage} disabled={Boolean(busy)} onChange={event => void updateStage(selectedPerson.id, event.target.value)}>{stages.map(stage => <option key={stage} value={stage}>{stageLabels[stage]}</option>)}</select></section></div>}
+      {personTab === 'Context' && <div className="person-context-grid"><section className="panel content-panel">{selectedPerson.profile ? <><h2>Profile context</h2><ProfileEvidence profile={selectedPerson.profile}/></> : <><h2>Available context</h2>{typeof selectedPerson.context.searchSnippet === 'string' && <div className="search-context"><p className="eyebrow muted">From search · unverified</p><p>{selectedPerson.context.searchSnippet}</p></div>}<p>Add facts you can confirm below to assess this person and prepare a conversation. Search snippets stay unverified.</p></>}</section><section className="panel content-panel"><p className="eyebrow">Your relationship</p><label htmlFor="stage">Relationship stage</label><select id="stage" value={selectedPerson.stage} disabled={Boolean(busy)} onChange={event => void updateStage(selectedPerson.id, event.target.value)}>{stages.map(stage => <option key={stage} value={stage}>{stageLabels[stage]}</option>)}</select></section></div>}
+      {personTab === 'Context' && <PersonEvidencePanel key={`${key}:${selectedPerson.id}`} uid={uid} person={selectedPerson} goals={goals.workspace.goals} activeGoal={goals.activeGoal} selfEvidence={selfEvidence} call={gatewayForAccount(uid)} onRemaining={setRemaining} onRecorded={refresh}/>}
       {personTab === 'Updates' && <section className="panel content-panel capture-panel"><h2>Record an update</h2>{captureForm}</section>}
-      {personTab === 'History' && <Timeline people={[selectedPerson]} events={selectedEvents} busy={Boolean(busy)} onKeep={keepPromise}/>}
+      {personTab === 'History' && <Timeline people={[selectedPerson]} events={selectedEvents} busy={Boolean(busy)} goals={goals.workspace.goals} onComplete={completeReminder}/>}
      </div>
     </> : <section className="panel"><EmptyState title="Choose a person to continue." action={<button className="button primary" onClick={() => setPage('Relationships')}>Your relationships</button>}>Open a saved person from Relationships.</EmptyState></section>)}
    </div>

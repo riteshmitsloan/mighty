@@ -1,6 +1,6 @@
 /** Only these finite values may cross into server diagnostics. No provider text or metadata. */
 const codes = ['INVALID_ARGUMENT','UNAUTHENTICATED','PERMISSION_DENIED','NOT_FOUND','RESOURCE_EXHAUSTED','FAILED_PRECONDITION','OUT_OF_RANGE','INTERNAL','UNAVAILABLE','DEADLINE_EXCEEDED','UNKNOWN','UNIMPLEMENTED','ABORTED','CANCELLED','DATA_LOSS','UNSPECIFIED'] as const;
-const reasons = ['API_KEY_INVALID','API_KEY_EXPIRED','API_KEY_NOT_FOUND','API_KEY_SERVICE_BLOCKED','API_KEY_HTTP_REFERRER_BLOCKED','API_KEY_IP_ADDRESS_BLOCKED','API_KEY_ANDROID_APP_BLOCKED','API_KEY_IOS_APP_BLOCKED','API_KEY_BLOCKED','CONSUMER_INVALID','SERVICE_DISABLED','BILLING_DISABLED','RATE_LIMIT_EXCEEDED','QUOTA_EXCEEDED','ACCESS_TOKEN_SCOPE_INSUFFICIENT','IAM_PERMISSION_DENIED','INVALID_FIELD_STORE','INVALID_FIELD_THINKING_BUDGET','LOCATION_UNSUPPORTED','UNSPECIFIED'] as const;
+const reasons = ['API_KEY_INVALID','API_KEY_EXPIRED','API_KEY_NOT_FOUND','API_KEY_SERVICE_BLOCKED','API_KEY_HTTP_REFERRER_BLOCKED','API_KEY_IP_ADDRESS_BLOCKED','API_KEY_ANDROID_APP_BLOCKED','API_KEY_IOS_APP_BLOCKED','API_KEY_BLOCKED','CONSUMER_INVALID','SERVICE_DISABLED','BILLING_DISABLED','RATE_LIMIT_EXCEEDED','QUOTA_EXCEEDED','ACCESS_TOKEN_SCOPE_INSUFFICIENT','IAM_PERMISSION_DENIED','INVALID_FIELD_STORE','INVALID_FIELD_THINKING_BUDGET','LOCATION_UNSUPPORTED','MODEL_NEW_USER_RESTRICTED','UNSPECIFIED'] as const;
 export type ProviderDiagnostic = Readonly<{ provider:'gemini'; httpStatus:number; code:typeof codes[number]; reason:typeof reasons[number] }>;
 export type ProviderDiagnosticEvent = ProviderDiagnostic & Readonly<{ event:'ai_provider_failure'; requestId:string }>;
 const codeSet = new Set<string>(codes), reasonSet = new Set<string>(reasons);
@@ -25,6 +25,7 @@ function extract(httpStatus:number,body:unknown):ProviderDiagnostic {
   else if(/thinking[_ ]?budget/i.test(message)&&/(?:invalid|must be|between|cannot|unsupported)/i.test(message))reason='INVALID_FIELD_THINKING_BUDGET';
   else if(/API key was reported as leaked/i.test(message))reason='API_KEY_BLOCKED';
   else if(/(?:user )?location is not supported/i.test(message))reason='LOCATION_UNSUPPORTED';
+  else if(httpStatus===404&&/model.{0,200}no longer available to new users/i.test(message))reason='MODEL_NEW_USER_RESTRICTED';
  }
  return sanitizeProviderDiagnostic({provider:'gemini',httpStatus,code:error?.status,reason})!;
 }

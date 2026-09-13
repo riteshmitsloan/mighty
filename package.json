@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "build": "bash tools/build-zip.sh && tsc -b && vite build",
+    "build": "bash tools/build-zip.sh && tsc -b && vite build && node scripts/update-product-plan.mjs",
     "build:extension": "node scripts/build-extension.mjs",
     "test": "tsx --test tests/*.test.ts",
     "install:ci": "npm ci",
