@@ -10,13 +10,21 @@ Mighty supports intentional professional networking: choose a goal, inspect the 
 - Team: Ritesh Mohan Srivastava and Jayati Kambhampati.
 - This document records progress and a demo agenda. Updating it sends no submission or email.
 
+## Extension reload repair: 0.3.6
+
+The reported native Chrome error was `Extension context invalidated` at the panel's font URL lookup. An old content script could keep running after an extension reload and throw before the font loader's own error handling. Version 0.3.6 guards that lookup and stops the invalidated controller's observers, route polling, timers and pending UI updates. Teardown tolerates invalid runtime access, removes only its own panel, and ignores callbacks from replaced connection ports.
+
+Seven regression cases cover invalid resource lookup, listener teardown, scheduled reads and controller replacement. All 196 extension checks and strict extension TypeScript pass. In a fresh native Chrome tab on installed 0.3.5, exactly one connected panel appeared at top 82/right 22 pixels and changed to Possible fit when the current executive role rendered. That verifies the fresh-tab path, not native 0.3.6 reload recovery. Installing the new package cannot rewrite already executing 0.3.5 callbacks: Chrome Reload and a one-time LinkedIn page refresh are still needed.
+
+The AI goal conversation and 0.3.5 download were published in commit 057aefc. GitHub Pages run 34772573558 succeeded; the public app assets matched the built files and the public ZIP matched SHA256 bd825d2d5bc1c2029142cbdadfc377fc100cd6cd33470e562d5ea087d31bc63d. Version 0.3.6 passes strict app TypeScript and production packaging. All 19 installed files in Documents/mighty-extension match the download, SHA256 4e67e3cbedb0bead0eaa9d404d5848b1154988a56b291293d2f55685204755b2. Chrome Reload and native 0.3.6 acceptance are pending.
+
 ## Goal conversation and profile navigation: September 13 afternoon
 
 The Goals page now offers an AI conversation above the manual editor. It asks focused follow-ups through the enabled, metered Ask slot, validates a compact JSON proposal, and requires Review, Use these details, then the existing Save goal action. Answers persist by account and goal; late responses cannot overwrite edits or cross account boundaries. Exact owner-sourced quotes ground new criteria, individual investor check size stays separate from the total round, unknowns remain questions, and explicit role inflections are normalized for matching. No file or network archive accompanies the request.
 
 19 goal-coach domain checks, 141 UI checks and 189 extension checks pass. Three live requests in one fictional career interview returned a contextual follow-up and two valid reviewable proposals, including the final singular contact-role normalization; no goal was saved. Automatic approval review refused the attempted private-goal test before dispatch, so only fictional inputs were used for live model acceptance. This establishes a bounded interview/proposal path, not every goal's recommendation quality or a measured price per user.
 
-Native Chrome 0.3.4 followed a LinkedIn profile link without a page refresh, showed the new person's name/photo in exactly one top-right panel, and updated to Possible fit when that person's Experience section rendered. Source version 0.3.5 also refuses old-person section evidence while the new header hydrates. Eight regression cases cover this source-attribution guard, alongside the navigation observer tests. The installed Documents/mighty-extension folder contains 0.3.5; its final native acceptance requires Chrome Reload. Toolbar connection-only behavior and the earlier Save-to-app acceptance remain as recorded below.
+Native Chrome 0.3.4 followed a LinkedIn profile link without a page refresh, showed the new person's name/photo in exactly one top-right panel, and updated to Possible fit when that person's Experience section rendered. Source version 0.3.5 also refuses old-person section evidence while the new header hydrates. Eight regression cases cover this source-attribution guard, alongside the navigation observer tests. The user confirmed Chrome had loaded 0.3.5. A fresh-tab native check and the subsequent reload error are recorded above. Toolbar connection-only behavior and the earlier Save-to-app acceptance remain as recorded below.
 
 ## Private login ID and password
 

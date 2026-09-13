@@ -11,7 +11,17 @@ type Account = {connected: boolean; userId: string | null; goalContext: AccountG
 export interface ProfilePanelOptions {
   document: Document; runtime: PanelRuntime; url: () => string;
   read?: (document: Document, url: string) => PageSnapshot;
+  onRuntimeInvalidated?: () => void;
 }
+function panelResourceURL(runtime: Pick<PanelRuntime, 'id' | 'getURL'>, path: string): string | null {
+  try {
+    const id = runtime.id; if (!id) return null;
+    const url = runtime.getURL(path);
+    return typeof url === 'string' && url.startsWith('chrome-extension://' + id + '/') ? url : null;
+  } catch {return null;}
+}
+export function panelRuntimeAvailable(runtime: Pick<PanelRuntime, 'id' | 'getURL'>) {return panelResourceURL(runtime, '') !== null;}
+export function runtimeInvalidation(error: unknown) {return Boolean(error && typeof error === 'object' && 'message' in error && /extension context invalidated/i.test(String(error.message)));}
 export function supportedPanelURL(url: string) {return Boolean(canonicalProfileURL(url));}
 /** Own renders must never trigger another LinkedIn read. Shadow-tree mutations do not cross this boundary. */
 export function relevantPageMutation(records: readonly MutationRecord[], host: HTMLElement) {
@@ -30,18 +40,28 @@ function profileSaveable(profile: Profile | null) {
 }
 export function createProfilePanel(options: ProfilePanelOptions) {
   const {document: doc, runtime} = options;
+  const fontURL = panelResourceURL(runtime, 'assets/mighty-ui.woff2');
   const host = doc.createElement('aside'); host.id = 'mighty-profile-panel';
   const shadow = host.attachShadow({mode: 'closed'});
-  loadPanelFont(doc, runtime.getURL('assets/mighty-ui.woff2'));
+  if (fontURL) loadPanelFont(doc, fontURL);
   const style = doc.createElement('style'); style.textContent = panelStyles() + COMPACT_PROFILE_CSS;
   const surface = element(doc, 'section', '', 'surface'); surface.setAttribute('aria-label', 'Mighty networking assistant');
-  shadow.append(style, surface); doc.documentElement.append(host);
+  shadow.append(style, surface); if (fontURL) doc.documentElement.append(host);
   let disposed = false, page: PageSnapshot | null = null, pageKey = '', route = '', selectedGoalId: string | null = null;
   let account: Account = {connected: false, userId: null, goalContext: null, appOrigin: ''};
   let checking = true, accountGeneration = 0, accountEpoch = 0, saving = false, notice = '', connectionDiagnostic = '';
   let minimized = false, skippedRoute = '';
   let port: chrome.runtime.Port | undefined, reconnect: ReturnType<typeof setTimeout> | undefined, reconnectAttempts = 0;
   const operations = new Map<string, SaveInput>(), savedKeys = new Set<string>();
+  function dispose() {
+    if (disposed) return; disposed = true; accountGeneration++; accountEpoch++; clearTimeout(reconnect);
+    const previous = port; port = undefined;
+    try {previous?.disconnect();} catch { /* A replaced extension can invalidate its old port. */ }
+    host.remove();
+  }
+  function invalidateRuntime() {if (disposed) return; dispose(); options.onRuntimeInvalidated?.();}
+  function runtimeReady() {if (disposed) return false; if (panelRuntimeAvailable(runtime)) return true; invalidateRuntime(); return false;}
+  function failedRuntime(error: unknown) {if (runtimeInvalidation(error) || !panelRuntimeAvailable(runtime)) {invalidateRuntime(); return true;} return false;}
   const el = <K extends keyof HTMLElementTagNameMap>(tag: K, text = '', cls = '') => element(doc, tag, text, cls);
   const pageSaved = () => page?.kind === 'profile' && savedKeys.has(account.userId + '|' + page.profile?.profileUrl + '|' + pageKey);
   function brand() {
@@ -53,7 +73,7 @@ export function createProfilePanel(options: ProfilePanelOptions) {
     try {const link = el('a', text, 'app-link'); link.href = mightyAppLink(account.appOrigin, runtime.id, !connect); link.target = '_blank'; link.rel = 'noopener noreferrer'; return link;} catch {return null;}
   }
   function render() {
-    if (disposed) return;
+    if (!runtimeReady()) return;
     host.hidden = !supportedPanelURL(options.url()); if (host.hidden) return;
     const active = shadow.activeElement as HTMLElement | null;
     const focusKey = active?.dataset.focus;
@@ -98,9 +118,13 @@ export function createProfilePanel(options: ProfilePanelOptions) {
     if (focusKey) (surface.querySelector(`[data-focus="${focusKey}"]`) as HTMLElement)?.focus();
   }
   async function send(message: unknown) {
-    const reply = await runtime.sendMessage(message); if (!reply?.ok) throw Error(reply?.message || 'Mighty could not complete this request. Try again.'); return reply;
+    try {
+      if (!runtimeReady()) throw Error('Extension context invalidated.');
+      const reply = await runtime.sendMessage(message); if (!reply?.ok) throw Error(reply?.message || 'Mighty could not complete this request. Try again.'); return reply;
+    } catch (error) {failedRuntime(error); throw error;}
   }
   async function refreshAccount(refreshGoals = false) {
+    if (!runtimeReady()) return;
     const ticket = ++accountGeneration; checking = true; render();
     try {
       const result: Account = await send({type: 'mighty:status', refreshGoals});
@@ -114,11 +138,12 @@ export function createProfilePanel(options: ProfilePanelOptions) {
     } finally {if (!disposed && ticket === accountGeneration) {checking = false; render();}}
   }
   function open() {
-    if (disposed) return;
+    if (!runtimeReady()) return;
     minimized = false; skippedRoute = ''; render();
     (surface.querySelector('.minimize') as HTMLButtonElement)?.focus();
   }
   async function saveSelected() {
+    if (!runtimeReady()) return;
     if (saving || checking || !account.connected || !account.userId || page?.kind !== 'profile') return;
     if (!profileSaveable(page.profile) || pageSaved()) return;
     const source = 'rendered_profile';
@@ -141,9 +166,9 @@ export function createProfilePanel(options: ProfilePanelOptions) {
     render();
   }
   function readPage() {
-    if (disposed) return;
+    if (!runtimeReady()) return;
     const current = options.url();
-    if (!supportedPanelURL(current)) {host.hidden = true; page = null; pageKey = ''; accountGeneration++; port?.disconnect(); port = undefined; return;}
+    if (!supportedPanelURL(current)) {host.hidden = true; page = null; pageKey = ''; accountGeneration++; const previous = port; port = undefined; try {previous?.disconnect();} catch {} return;}
     const nextRoute = canonicalProfileURL(current) || current;
     const changed = route !== nextRoute;
     if (changed) {route = nextRoute; page = null; pageKey = ''; notice = '';}
@@ -152,16 +177,17 @@ export function createProfilePanel(options: ProfilePanelOptions) {
       if (key !== pageKey) {
         page = next; pageKey = key;
         render();
-        void runtime.sendMessage({type: 'mighty:page_changed'}).catch(() => {});
+        void runtime.sendMessage({type: 'mighty:page_changed'}).catch(error => {failedRuntime(error);});
       } else if (host.hidden) render();
-    } catch {page = null; pageKey = ''; notice = 'This profile could not be read. Refresh LinkedIn and try again.'; render();}
+    } catch (error) {if (failedRuntime(error)) return; page = null; pageKey = ''; notice = 'This profile could not be read. Refresh LinkedIn and try again.'; render();}
     if (changed) {connect(); void refreshAccount(true);}
   }
   function connect() {
-    if (disposed || port || !supportedPanelURL(options.url())) return;
+    if (!runtimeReady() || port || !supportedPanelURL(options.url())) return;
     try {
-      port = runtime.connect({name: 'mighty:panel'});
-      port.onMessage.addListener(message => {
+      const current = runtime.connect({name: 'mighty:panel'}); port = current;
+      current.onMessage.addListener(message => {
+        if (port !== current || !runtimeReady()) return;
         if (message?.type === 'mighty:ready' && message.protocol === 1) {reconnectAttempts = 0; return;}
         if (message?.type === 'mighty:panel_rejected') {
           if (typeof message.message === 'string') connectionDiagnostic = message.message.slice(0, 300);
@@ -172,17 +198,19 @@ export function createProfilePanel(options: ProfilePanelOptions) {
         accountGeneration++; accountEpoch++; account = {...account, connected: false, goalContext: null}; selectedGoalId = null;
         render(); void refreshAccount();
       });
-      port.onDisconnect.addListener(() => {
-        void runtime.lastError; port = undefined; if (disposed || !supportedPanelURL(options.url())) return;
+      current.onDisconnect.addListener(() => {
+        try {void runtime.lastError;} catch { /* Invalidated runtime getters can throw too. */ }
+        if (disposed || port !== current) return;
+        port = undefined; if (!runtimeReady() || !supportedPanelURL(options.url())) return;
         accountGeneration++; accountEpoch++; account = {...account, connected: false, userId: null, goalContext: null}; render();
         clearTimeout(reconnect);
         if (++reconnectAttempts > 8) {connectionDiagnostic ||= account.message || 'Mighty could not reconnect. Refresh this page to try again.'; render(); return;}
         reconnect = setTimeout(() => {connect(); void refreshAccount(true);}, Math.min(1000, reconnectAttempts * 100));
       });
-    } catch {account = {...account, connected: false, goalContext: null}; connectionDiagnostic = 'Mighty was reloaded. Refresh this page to reconnect.'; render();}
+    } catch (error) {if (failedRuntime(error)) return; account = {...account, connected: false, goalContext: null}; connectionDiagnostic = 'Mighty was reloaded. Refresh this page to reconnect.'; render();}
   }
-  readPage();
-  return {host, shadow, readPage, refreshAccount, open, dispose() {disposed = true; accountGeneration++; accountEpoch++; clearTimeout(reconnect); port?.disconnect(); host.remove();}};
+  if (fontURL) readPage(); else invalidateRuntime();
+  return {host, shadow, readPage, refreshAccount, open, dispose};
 }
 
 function panelStyles() {return `

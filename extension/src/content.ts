@@ -1,37 +1,54 @@
 import {snapshot} from './profile.js';
-import {createProfilePanel, relevantPageMutation} from './profile-panel.js';
+import {createProfilePanel, relevantPageMutation, panelRuntimeAvailable, runtimeInvalidation} from './profile-panel.js';
 import {profilePanelEligibility} from './panel-eligibility.js';
 import {canonicalProfileURL, isSearchURL} from './urls.js';
 
 type Mount = {dispose: () => void};
 const scope = globalThis as typeof globalThis & {__mightyResearch?: Mount};
-scope.__mightyResearch?.dispose();
+let availableRuntime: typeof chrome.runtime | undefined;
+try {availableRuntime = chrome.runtime;} catch { /* The old isolated context may already be invalid. */ }
+const validRuntime = availableRuntime && panelRuntimeAvailable(availableRuntime);
+if (validRuntime) {
+  // Only a live bootstrap may replace another mount. Capture its host before
+  // teardown so an older controller never looks up a later replacement.
+  const previousHost = document.getElementById('mighty-profile-panel');
+  try {scope.__mightyResearch?.dispose();} catch { /* An older controller may use an invalid runtime during teardown. */ }
+  previousHost?.remove();
+}
 const supportedReadURL = () => Boolean(canonicalProfileURL(location.href) || isSearchURL(location.href));
-if (supportedReadURL()) {
+if (availableRuntime && validRuntime && supportedReadURL()) {
+  const runtime = availableRuntime;
   let panel: ReturnType<typeof createProfilePanel> | null = null;
   let disposed = false, lastUrl = location.href;
   let timer: ReturnType<typeof setTimeout> | undefined, maximum: ReturnType<typeof setTimeout> | undefined;
+  function runtimeReady() {if (disposed) return false; if (panelRuntimeAvailable(runtime)) return true; dispose(); return false;}
   const listener = (message: unknown, sender: chrome.runtime.MessageSender, respond: (result: unknown) => void) => {
-    if (sender.id !== chrome.runtime.id || !message || typeof message !== 'object' || !('type' in message) || message.type !== 'mighty:read') return;
-    respond(snapshot(document, location.href));
+    if (!runtimeReady()) return;
+    try {
+      if (sender.id !== runtime.id || !message || typeof message !== 'object' || !('type' in message) || message.type !== 'mighty:read') return;
+      respond(snapshot(document, location.href));
+    } catch (error) {if (runtimeInvalidation(error) || !panelRuntimeAvailable(runtime)) dispose(); else throw error;}
   };
-  chrome.runtime.onMessage.addListener(listener);
   function read() {
     clearTimeout(timer); clearTimeout(maximum); timer = maximum = undefined;
-    if (disposed) return;
+    if (!runtimeReady()) return;
     if (!supportedReadURL()) {dispose(); return;}
     lastUrl = location.href;
     if (profilePanelEligibility(document, location.href) === 'other') {
-      if (!panel) panel = createProfilePanel({document, runtime: chrome.runtime, url: () => location.href});
+      if (!panel) {
+        const created = createProfilePanel({document, runtime, url: () => location.href, onRuntimeInvalidated: dispose});
+        if (disposed) created.dispose(); else panel = created;
+      }
       else panel.readPage();
     } else {
       panel?.dispose(); panel = null;
       // The parser remains available without mounting an automatic assessment.
-      try {void chrome.runtime.sendMessage({type: 'mighty:page_changed'}).catch(() => {});} catch {}
+      try {void runtime.sendMessage({type: 'mighty:page_changed'}).catch(error => {if (runtimeInvalidation(error) || !panelRuntimeAvailable(runtime)) dispose();});}
+      catch (error) {if (runtimeInvalidation(error) || !panelRuntimeAvailable(runtime)) dispose();}
     }
   }
   function changed(records?: MutationRecord[]) {
-    if (disposed || (records && panel && !relevantPageMutation(records, panel.host))) return;
+    if (!runtimeReady() || (records && panel && !relevantPageMutation(records, panel.host))) return;
     if (location.href !== lastUrl) {panel?.dispose(); panel = null;}
     clearTimeout(timer); timer = setTimeout(read, 180);
     // A continuously updating LinkedIn page cannot postpone the read indefinitely.
@@ -41,7 +58,7 @@ if (supportedReadURL()) {
   // SDUI can hydrate the new subject/control identity after the URL and visible
   // text change. Those final attribute-only updates must retry eligibility too.
   observer.observe(document.documentElement, {childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ['componentkey', 'id', 'href', 'src', 'alt', 'class', 'style', 'hidden', 'aria-hidden', 'aria-label']});
-  const routeChanged = () => {if (location.href !== lastUrl) {panel?.dispose(); panel = null; read();}};
+  const routeChanged = () => {if (runtimeReady() && location.href !== lastUrl) {panel?.dispose(); panel = null; read();}};
   const focus = () => {if (disposed) return; read(); if (!disposed && panel) void panel.refreshAccount(true);};
   addEventListener('popstate', routeChanged); addEventListener('focus', focus);
   // URL checks catch pushState navigation without modifying LinkedIn's history functions.
@@ -49,9 +66,11 @@ if (supportedReadURL()) {
   function dispose() {
     if (disposed) return; disposed = true;
     observer.disconnect(); clearTimeout(timer); clearTimeout(maximum); clearInterval(routes);
-    chrome.runtime.onMessage.removeListener(listener); removeEventListener('popstate', routeChanged); removeEventListener('focus', focus);
+    try {runtime.onMessage.removeListener(listener);} catch { /* Cleanup must continue after invalidation. */ }
+    removeEventListener('popstate', routeChanged); removeEventListener('focus', focus);
     panel?.dispose(); panel = null;
+    if (scope.__mightyResearch === mount) delete scope.__mightyResearch;
   }
-  scope.__mightyResearch = {dispose};
-  read();
+  const mount = {dispose}; scope.__mightyResearch = mount;
+  try {runtime.onMessage.addListener(listener); read();} catch (error) {dispose(); if (!runtimeInvalidation(error) && panelRuntimeAvailable(runtime)) throw error;}
 }

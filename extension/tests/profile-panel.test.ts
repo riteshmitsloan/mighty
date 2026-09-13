@@ -128,6 +128,22 @@ test('successful status recovery clears only the connection diagnostic, preservi
   assert.match(h.find('.notice').textContent||'',/profile could not be read/);assert.doesNotMatch(h.find('.content').textContent||'',/panel_route_changed/);
  }finally{h.panel.dispose();}
 });
+test('late messages and duplicate disconnects from a replaced port cannot reset the current account',async()=>{
+ const h=await harness();try{
+  const oldPort=h.ports[0];oldPort.disconnect();
+  assert.equal(h.find('.account-state').textContent,'Account not connected');
+  await new Promise(resolve=>setTimeout(resolve,120));await tick();
+  assert.equal(h.ports.length,2);assert.equal(h.find('.account-state').textContent,'Account connected');
+  const requests=h.calls.length;
+  oldPort.emit({type:'mighty:account_changed'});oldPort.emit({type:'mighty:panel_rejected',message:'Obsolete port rejection'});oldPort.disconnect();
+  await tick();
+  assert.equal(h.find('.account-state').textContent,'Account connected');assert.equal(h.find('.notice'),null);
+  assert.equal(h.calls.length,requests);assert.equal(h.ports.length,2);
+  h.state.owner=other;h.state.goals=context(other,[{...fundraising,title:'Current owner goal'}]);
+  h.ports[1].emit({type:'mighty:account_changed'});await tick();
+  assert.equal(h.find('.goal-pill').textContent,'Current owner goal','The current port remains usable.');
+ }finally{h.panel.dispose();}
+});
 test('observer ignores panel-only mutations while retaining actual page changes',async()=>{
  const h=await harness();try{
   const mutation=(target:Node,added:Node[],removed:Node[]=[])=>({type:'childList',target,addedNodes:added,removedNodes:removed}) as unknown as MutationRecord;
