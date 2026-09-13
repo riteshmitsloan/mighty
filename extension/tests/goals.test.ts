@@ -100,14 +100,18 @@ test('slow account A cannot restore A after B handoff or disconnect', async () =
   assert.equal((await state.current())?.userId,other);assert.equal((await state.current())?.goalContext?.userId,other);
   const later=deferred<Session>(),job=state.connect(()=>later.promise);await state.disconnect();later.resolve(session());await assert.rejects(job,/newer/);assert.equal(await state.current(),null);
 });
-test('expired and pre-upgrade sessions remove all cached strategy and goals', async () => {
-  for(const value of [{...session(),expiresAt:Date.parse(now)},{...session(),goalContext:undefined},{...session(),goalContext:context([career],other)}]) {
-    const storage=memory(value),state=createAccountSession(storage,()=>{},()=>Date.parse(now));assert.equal(await state.current(),null);assert.equal(storage.value,null);assert.ok(state.message());
+test('expired accounts clear identity, while missing or foreign goal caches clear only goals', async () => {
+  const expiredStorage=memory({...session(),expiresAt:Date.parse(now)}),expired=createAccountSession(expiredStorage,()=>{},()=>Date.parse(now));
+  assert.equal(await expired.current(),null);assert.equal(expiredStorage.value,null);assert.match(expired.message(),/expired/);
+  for(const value of [{...session(),goalContext:undefined},{...session(),goalContext:context([career],other)}]) {
+    const storage=memory(value),state=createAccountSession(storage,()=>{},()=>Date.parse(now)),current=await state.current();
+    assert.equal(current?.userId,uid);assert.equal(current?.accessToken,value.accessToken);assert.equal(current?.goalContext,undefined);assert.equal(current?.strategy,'');
+    if(value.goalContext)assert.equal(storage.value?.goalContext,undefined);
   }
 });
 test('refresh replaces goal version and clears old context while loading', async () => {
   const storage=memory(session()),state=createAccountSession(storage,()=>{},()=>Date.parse(now)),pending=deferred<Session>();
-  const job=state.refresh(()=>pending.promise);await new Promise(resolve=>setImmediate(resolve));assert.equal(await state.current(),null);
+  const job=state.refresh(()=>pending.promise);await new Promise(resolve=>setImmediate(resolve));assert.equal((await state.current())?.userId,uid);assert.equal((await state.current())?.goalContext,undefined);
   pending.resolve(session(uid,[{...career,version:2}]));await job;assert.equal((await state.current())?.goalContext?.goals[0].version,2);assert.equal((await state.current())?.strategy,'');
 });
 test('server row caps and missing exact counts cannot silently shorten the account workspace', async () => {
@@ -128,4 +132,62 @@ test('an already-started read cannot return account A while account B clear is d
   clear.resolve();const result=await read;await handoff;
   assert.notEqual(result?.userId,uid);assert.notEqual(result?.goalContext?.userId,uid);
   assert.equal((await state.current())?.userId,other);
+});
+
+test('verified connection remains available during a goal load and after transient goal failure', async () => {
+  const storage=memory(session(other)),state=createAccountSession(storage,()=>{},()=>Date.parse(now)),pending=deferred<Session>();
+  const job=state.connect(async()=>({...session(),goalContext:undefined}),()=>pending.promise);
+  await new Promise(resolve=>setImmediate(resolve));assert.equal((await state.current())?.userId,uid);assert.equal((await state.current())?.goalContext,undefined);
+  pending.reject(new AccountConnectionError('goals_unavailable'));
+  assert.equal((await job)?.userId,uid);assert.equal((await state.current())?.goalContext,undefined);assert.equal(state.code(),'goals_unavailable');
+  const recovered=await state.refresh(async previous=>({...previous,goalContext:context()}));assert.equal(recovered?.goalContext?.userId,uid);assert.equal(state.message(),'');
+});
+test('goal retrieval HTTP401 clears identity but 403, transport and schema errors preserve it without goals', async () => {
+  for(const code of ['goals_session_rejected','goals_forbidden','goals_unavailable','goals_invalid','goals_incomplete'] as const){
+    const storage=memory(session()),state=createAccountSession(storage,()=>{},()=>Date.parse(now));
+    const result=await state.refresh(async()=>{throw new AccountConnectionError(code);});
+    assert.equal(result?.userId??null,code==='goals_session_rejected'?null:uid);assert.equal(result?.goalContext,undefined);assert.equal(state.code(),code);
+    assert.equal(storage.value?.goalContext,undefined);
+  }
+});
+test('a slow old goal refresh cannot replace or erase a newer account after either success or HTTP401', async () => {
+  for(const reject of [false,true]){
+    const state=createAccountSession(memory(session()),()=>{},()=>Date.parse(now)),pending=deferred<Session>();
+    const job=state.refresh(()=>pending.promise);await new Promise(resolve=>setImmediate(resolve));await state.connect(async()=>session(other));
+    if(reject)pending.reject(new AccountConnectionError('goals_session_rejected'));else pending.resolve(session());await job;
+    assert.equal((await state.current())?.userId,other);assert.equal((await state.current())?.goalContext?.userId,other);assert.equal(state.message(),'');
+  }
+});
+test('the newest refresh wins and a goals loader cannot alter the verified identity or expiry', async () => {
+  const state=createAccountSession(memory(session()),()=>{},()=>Date.parse(now)),pending=deferred<Session>();
+  const old=state.refresh(()=>pending.promise);await new Promise(resolve=>setImmediate(resolve));
+  await state.refresh(async previous=>({...previous,goalContext:context([{...career,version:3}])}));pending.resolve(session(uid,[{...career,version:2}]));await old;
+  assert.equal((await state.current())?.goalContext?.goals[0].version,3);
+  for(const changes of [{userId:other},{accessToken:'replacement'},{expiresAt:Date.parse(now)+999999}]){
+    const result=await state.refresh(async previous=>({...previous,...changes,goalContext:context()}));assert.equal(result?.userId,uid);assert.equal(result?.accessToken,'synthetic-token');assert.equal(result?.goalContext,undefined);assert.equal(state.code(),'goals_cache_invalid');
+  }
+});
+test('late rejection invalidates only the matching bearer, including same-owner token replacement', async () => {
+  const a=session(),state=createAccountSession(memory(a),()=>{},()=>Date.parse(now));
+  const next={...session(),accessToken:'new-bearer'};await state.connect(async()=>next);await state.invalidate(a);assert.equal((await state.current())?.accessToken,'new-bearer');
+  await state.connect(async()=>session(other));await state.invalidate(next);assert.equal((await state.current())?.userId,other);
+  await state.invalidate(session(other));assert.equal(await state.current(),null);
+});
+
+test('a popup goal refresh cannot make a finishing verified handoff report an account replacement', async () => {
+  const state=createAccountSession(memory(),()=>{},()=>Date.parse(now)),pending=deferred<Session>();
+  const handoff=state.connect(async()=>({...session(),goalContext:undefined}),()=>pending.promise);
+  await new Promise(resolve=>setImmediate(resolve));
+  await state.refresh(async previous=>({...previous,goalContext:context([{...career,version:2}])}));
+  pending.resolve(session());const result=await handoff;
+  assert.equal(result?.userId,uid);assert.equal(result?.goalContext?.goals[0].version,2);assert.equal(state.message(),'');
+});
+
+test('a concurrent goals refresh cannot hide an HTTP401 for the still-current bearer',async()=>{
+  const read=deferred<Session>(),goalLoad=deferred<Session>();let value:Session|null=session(),reads=0;
+  const state=createAccountSession({async read(){if(++reads===1)return read.promise;return value;},async write(next){value=next;}},()=>{},()=>Date.parse(now));
+  const rejected=state.invalidate(session());await new Promise(resolve=>setImmediate(resolve));
+  const refreshing=state.refresh(()=>goalLoad.promise);await new Promise(resolve=>setImmediate(resolve));
+  read.resolve(session());await rejected;assert.equal(await state.current(),null);
+  goalLoad.resolve(session());await refreshing;assert.equal(await state.current(),null);
 });

@@ -2,6 +2,7 @@ import{hasSubstantiveProfile}from'./profile.js';
 import{AccountConnectionError}from'./account-errors.js';
 import{validCurrentExperienceAnchor}from'../../src/lib/current-experience';
 import{canonicalProfileURL,exactAppURL}from'./urls.js';
+import{canonicalProfilePhotoUrl}from'../../src/lib/profile-photo';
 import type{PendingSave,Profile,PublicConfig,SaveInput,Session}from'./types.js';
 const uuid=/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 export function isExternalSender(sender:{url?:string;origin?:string;id?:string},allowedOrigins:string[]):boolean{
@@ -35,6 +36,7 @@ export function validateSave(value:unknown,session:Session):SaveInput{
  if(!value||typeof value!=='object')throw Error('Invalid save request.');const x=value as SaveInput;
  if(!uuid.test(x.operationId)||x.userId!==session.userId||!['rendered_profile','search_result'].includes(x.source))throw Error('The save belongs to a different account or is invalid.');
  const p=x.profile;if(!p||canonicalProfileURL(p.profileUrl)!==p.profileUrl||typeof p.name!=='string'||!p.name.trim()||p.name.length>200||!Array.isArray(p.anchors)||typeof p.truncated!=='boolean'||!Array.isArray(p.truncationReasons))throw Error('The profile snapshot is invalid.');
+ if(p.photoUrl!==undefined&&canonicalProfilePhotoUrl(p.photoUrl)!==p.photoUrl)throw Error('The profile photo must use a supported LinkedIn image URL.');
  if(x.source==='search_result'&&(p.profileReadAt!==null||p.anchors.length))throw Error('Search snippets cannot be marked as a profile read.');
  if(x.source==='rendered_profile'&&(!hasSubstantiveProfile(p)||(!p.truncated&&(!p.profileReadAt||!Number.isFinite(Date.parse(p.profileReadAt))))))throw Error('Read the actual profile before saving this snapshot.');
  const kinds=['headline','location','about','experience','education','skills','languages','certifications','activity','timing'];

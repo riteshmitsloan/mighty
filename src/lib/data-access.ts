@@ -2,10 +2,11 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { cleanText } from './text';
 import {verifiedCompanyOverlap,type Connection} from './discover';
 import {companyKey} from './archive';
-export interface Person { id:string;person:string;profile_url:string|null;stage:string;context:Record<string,unknown>;created_at:string;profile?:Record<string,unknown> }
+import {canonicalProfilePhotoUrl,snapshotPhotoUrl} from './profile-photo';
+export interface Person { id:string;person:string;profile_url:string|null;stage:string;context:Record<string,unknown>;created_at:string;profile?:Record<string,unknown>;photoUrl?:string }
 export interface Capture { id:string;relationship_id:string;kind:string;body:string;related_event_id:string|null;created_at:string }
 interface ProfileRead { id:string;relationship_id:string;snapshot:Record<string,unknown>;observed_at:string;created_at:string }
-export interface PersonInput { person:string;url?:string|null;reason:string;company?:string;position?:string;source?:string;searchHeadline?:string;searchSnippet?:string }
+export interface PersonInput { person:string;url?:string|null;reason:string;company?:string;position?:string;source?:string;searchHeadline?:string;searchSnippet?:string;photoUrl?:string }
 export type PinnedAccountCheck=()=>Promise<unknown>;
 
 /** A stable ID cursor cannot skip rows when earlier records leave the result set. */
@@ -32,7 +33,10 @@ export async function readRelationshipData(client:SupabaseClient,uid:string){
  people.sort(newest);events.sort(newest);
  reads.sort((a,b)=>Date.parse(b.observed_at)-Date.parse(a.observed_at)||newest(a,b));
  const latest=new Map<string,Record<string,unknown>>();for(const read of reads)if(!latest.has(read.relationship_id))latest.set(read.relationship_id,read.snapshot);
- return {people:people.map(person=>({...person,profile:latest.get(person.id)||(person.context.profileComplete?person.context.profile as Record<string,unknown>:undefined)})),events};
+ const byId=new Map(people.map(person=>[person.id,person])),photos=new Map<string,string>();
+ for(const read of reads){const owner=byId.get(read.relationship_id);if(!owner||photos.has(owner.id))continue;const photo=snapshotPhotoUrl(read.snapshot,owner.profile_url);if(photo)photos.set(owner.id,photo);}
+ return {people:people.map(person=>{const photoUrl=photos.get(person.id)||snapshotPhotoUrl(person.context.profile,person.profile_url)||canonicalProfilePhotoUrl(person.context.photoUrl);return {...person,
+  profile:latest.get(person.id)||(person.context.profileComplete?person.context.profile as Record<string,unknown>:undefined),...(photoUrl?{photoUrl}:{})};}),events};
 }
 export async function readConnectionsData(client:SupabaseClient,uid:string):Promise<Connection[]>{
  const [rows,source]=await Promise.all([
@@ -50,7 +54,8 @@ export async function savePersonData(client:SupabaseClient,uid:string,input:Pers
  const person=cleanText(input.person).trim();if(!person||person.length>200)throw Error('Enter a name under 200 characters.');
  const existing=async()=>{const result=await client.from('outreach_log').select('id').eq('user_id',uid).eq('profile_url',profileUrl).maybeSingle();if(result.error)throw Error(result.error.message);return result.data?.id as string|undefined;};
  if(profileUrl){const id=await existing();if(id)return id;}
- const result=await client.from('outreach_log').insert({user_id:uid,person,profile_url:profileUrl,context:{saveReason:cleanText(input.reason),source:input.source||'manual',company:input.company||'',position:input.position||'',...(input.searchHeadline?{searchHeadline:cleanText(input.searchHeadline).slice(0,2000)}:{}),...(input.searchSnippet?{searchSnippet:cleanText(input.searchSnippet).slice(0,8000)}:{}),profileComplete:false}}).select('id').single();
+ const photoUrl=canonicalProfilePhotoUrl(input.photoUrl);
+ const result=await client.from('outreach_log').insert({user_id:uid,person,profile_url:profileUrl,context:{saveReason:cleanText(input.reason),source:input.source||'manual',company:input.company||'',position:input.position||'',...(photoUrl?{photoUrl}:{}),...(input.searchHeadline?{searchHeadline:cleanText(input.searchHeadline).slice(0,2000)}:{}),...(input.searchSnippet?{searchSnippet:cleanText(input.searchSnippet).slice(0,8000)}:{}),profileComplete:false}}).select('id').single();
  if(result.error){
   if(result.error.code==='23505'&&profileUrl){const id=await existing();if(id)return id;}
   throw Error(result.error.message);

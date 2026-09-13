@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
 import {resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {readProfile, snapshot} from '../src/profile.js';
+import {readProfile, snapshot, profileTopCard} from '../src/profile.js';
 
 const deps=process.env.MIGHTY_DEPS_ROOT||fileURLToPath(new URL('../../',import.meta.url));
 const {parseHTML}=createRequire(resolve(deps,'package.json'))('linkedom');
@@ -14,6 +14,18 @@ const experience='<section><h2>Experience</h2><ul><li>Research engineer at Examp
 const marker=(heading='<h2>Alex River</h2>',slug='alex-river')=>`<div componentkey="ProfileVerificationTriggerRef-${slug}">${heading}</div>`;
 const card=(body=marker(),attribute='componentkey',key='com.linkedin.sdui.profile.card.ref.syntheticTopcard')=>`<div ${attribute}="${key}"><section>${body}</section></div>`;
 const page=(top=card(),sections=about,extra='')=>documentOf(`<main>${extra}<section aria-label="Primary content">${top}${sections}</section></main>`);
+
+test('ownership controls receive only the verified top card or an unambiguous classic subject section',()=>{
+ const doc=page();assert.equal(profileTopCard(doc,url),doc.querySelector('[componentkey="com.linkedin.sdui.profile.card.ref.syntheticTopcard"]'));
+ assert.equal(profileTopCard(doc,'https://www.linkedin.com/in/another-person/'),null);
+ assert.equal(profileTopCard(page(card(marker('<h2 hidden>Alex River</h2>'))),url),null);
+ assert.equal(profileTopCard(page('',about,card()),url),null);
+ const classic=documentOf('<main><section id="subject"><h1>Alex River</h1><button>Edit profile</button></section><aside><button>Message</button></aside></main>');
+ assert.equal(profileTopCard(classic,url),classic.querySelector('#subject'));
+ assert.equal(profileTopCard(documentOf('<main><h1>Alex River</h1><button>Message</button></main>'),url),null);
+ classic.querySelector('main')!.insertAdjacentHTML('beforeend','<section><h1>Another Person</h1></section>');
+ assert.equal(profileTopCard(classic,url),null);
+});
 
 test('the exact SDUI subject marker unlocks a real About/Experience read without an h1',()=>{
  const doc=page(card(),about+experience),profile=readProfile(doc,url,now)!;

@@ -4,6 +4,7 @@ import {rankGoalNetwork,type RankedGoalCandidate} from '../lib/assessment';
 import {candidateKey,type EvidenceClaim} from '../lib/evidence';
 import type {Connection} from '../lib/discover';
 import {Avatar} from './DesignPrimitives';
+import {personPhotoUrl} from '../lib/profile-photo';
 import './GoalShortlist.css';
 
 export default function GoalShortlist({goal,all,selfEvidence,savedUrls,onSave,query=''}:{goal:Goal;all:Connection[];selfEvidence:readonly EvidenceClaim[];savedUrls:Set<string>;onSave:(person:Connection,reason:string)=>Promise<void>;query?:string}){
@@ -31,7 +32,7 @@ export default function GoalShortlist({goal,all,selfEvidence,savedUrls,onSave,qu
    const wasSaved=saved.has(row.candidateKey)||Boolean(row.person.profile_url&&normalizedSaved.has(candidateKey({url:row.person.profile_url})));
    const claims=[...row.candidate.claims,...selfEvidence];
    return <article className="panel shortlist-card" key={row.candidateKey}>
-    <div className="shortlist-person"><Avatar name={row.candidate.name}/><div><h3>{row.candidate.name}</h3><p className="muted small">{[row.person.position||row.person.role,row.candidate.company].filter(Boolean).join(' · ')}</p></div></div>
+    <div className="shortlist-person"><Avatar name={row.candidate.name} photoUrl={personPhotoUrl(row.person as Connection)}/><div><h3>{row.candidate.name}</h3><p className="muted small">{[row.person.position||row.person.role,row.candidate.company].filter(Boolean).join(' · ')}</p></div></div>
     <span className="pill neutral">{row.label}</span>
     <p className="shortlist-reason">{row.reasons[0]}</p>
     {row.unknowns.length>0&&<p className="muted small">{row.unknowns[0]}</p>}

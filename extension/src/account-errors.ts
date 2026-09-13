@@ -10,13 +10,13 @@ const messages = {
   session_project_mismatch: 'The app and extension use different account services. Download the current extension from Mighty.',
   session_expired: 'Your app session expired. Sign in to Mighty again, then reconnect.',
   session_lifetime: 'The app session lasts longer than the extension allows. Update Mighty and reconnect.',
-  goals_unavailable: 'Account goals could not be refreshed. Check your connection and reconnect from Mighty.',
+  goals_unavailable: 'Account goals could not be refreshed. Check your connection and retry goals.',
   goals_session_rejected: 'Account goals could not be loaded because the session expired. Sign in to Mighty again, then reconnect.',
   goals_forbidden: 'Account goals could not be loaded because access was refused. Update Mighty and reconnect.',
-  goals_failed: 'Account goals could not be loaded. Try connecting again from Mighty.',
+  goals_failed: 'Account goals could not be loaded. Retry goals in a moment.',
   goals_unreadable: 'Account goals returned an unreadable response. Reconnect from Mighty.',
   goals_invalid: 'Account goals are incompatible or incomplete. Update Mighty and reconnect; no previous goals are being used.',
-  goals_incomplete: 'Account goals could not be loaded completely. Reconnect from Mighty; no previous goals are being used.',
+  goals_incomplete: 'Account goals could not be loaded completely. Retry goals; no previous goals are being used.',
   goals_cache_invalid: 'Saved account goals could not be verified. Reconnect from Mighty.',
   connection_superseded: 'A newer account connection replaced this request. Return to Mighty and try again.',
   connection_failed: 'The account connection could not be completed. Reconnect from Mighty.',
@@ -29,4 +29,9 @@ export class AccountConnectionError extends Error {
 export function accountFailure(error: unknown): {code: AccountErrorCode; message: string} {
   const code = error instanceof AccountConnectionError ? error.code : 'connection_failed';
   return {code, message: messages[code]};
+}
+
+/** Only authentication evidence clears a verified account; goal transport/schema errors do not. */
+export function isAuthenticationFailure(error: unknown): boolean {
+  return error instanceof AccountConnectionError && ['goals_session_rejected','verification_rejected','session_expired','session_invalid','session_mismatch','session_project_mismatch','session_lifetime'].includes(error.code);
 }

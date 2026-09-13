@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Mighty",
-  "version": "0.2.5",
+  "version": "0.3.0",
   "description": "Mighty. Intentional, intelligent networking.",
   "permissions": [
     "storage",
@@ -17,7 +17,18 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "Mighty"
+    "default_title": "Mighty: connect your account",
+    "default_icon": {
+      "16": "assets/icons/mighty-disconnected-16.png",
+      "24": "assets/icons/mighty-disconnected-24.png",
+      "32": "assets/icons/mighty-disconnected-32.png",
+      "48": "assets/icons/mighty-disconnected-48.png"
+    }
+  },
+  "icons": {
+    "16": "assets/icons/mighty-connected-16.png",
+    "48": "assets/icons/mighty-connected-48.png",
+    "128": "assets/icons/mighty-connected-128.png"
   },
   "content_scripts": [
     {

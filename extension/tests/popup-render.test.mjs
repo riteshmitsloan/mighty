@@ -97,25 +97,19 @@ await test('partial saves report the saved count; retry keeps the failed operati
   assert.equal(h.saves[5].operationId, first.operationId);
   assert.match(h.document.querySelector('#notice').textContent, /^Saved\./);
 });
-await test('profile groups preserve every fact, explanation precedes fit, save payload stays intact', async () => {
-  const p = profile();
-  const h = await open({kind: 'profile', state: 'ready', profile: p, message: ''});
-  assert.equal([...h.document.querySelectorAll('h2')].filter(node => node.textContent === 'Experience').length, 1);
-  assert.match(h.document.body.textContent, /Role one: full factual text\./);
-  assert.match(h.document.body.textContent, /Role two: full factual text\./);
-  assert.match(h.document.body.textContent, /END_SENTINEL/);
-  const fit = h.document.querySelector('.goal-fit');
-  assert.equal(fit.querySelector('summary').textContent, career.title);
-  const children = [...fit.children];
-  assert.ok(children.indexOf(fit.querySelector('.reason')) < children.indexOf(fit.querySelector('.fit-label')));
-  assert.match(fit.querySelector('.reason').textContent, /Healthcare experience/);
-  assert.equal(h.document.querySelectorAll('.goal-fit').length, 2);
-  assert.match(h.document.querySelectorAll('.goal-fit')[1].textContent, /Still unknown/);
-  assert.doesNotMatch(h.document.body.textContent, /probability|percentile|\d+%/i);
-  assert.match(h.document.body.textContent, /Activity date: Sep 10, 2026/);
-  await h.clickSave();
-  assert.deepEqual(h.saves[0].profile, p);
-  assert.equal(h.saves[0].source, 'rendered_profile');
+await test('compact profile shows one selected assessment while saving every original source fact', async () => {
+  const p = profile(); const h = await open({kind: 'profile', state: 'ready', profile: p, message: ''});
+  assert.equal(h.document.querySelectorAll('.goal-pill').length, 2);
+  assert.equal(h.document.querySelectorAll('.goal-fit').length, 1);
+  assert.equal(h.document.querySelector('.goal-pill[aria-pressed="true"]').textContent, career.title);
+  assert.equal(h.document.querySelector('.fit-label').textContent, 'Possible fit');
+  assert.match(h.document.querySelector('.reason').textContent, /Healthcare experience/);
+  assert.equal(h.document.querySelectorAll('.evidence-section,.assessment-sources,.goal-unknowns,.missing-sections').length, 0);
+  assert.doesNotMatch(h.document.querySelector('#content').textContent, /END_SENTINEL|Activity date|Why this matters|probability|percentile|\d+%/i);
+  h.document.querySelectorAll('.goal-pill')[1].click();
+  assert.equal(h.document.querySelector('.goal-pill[aria-pressed="true"]').textContent, fundraising.title);
+  assert.equal(h.document.querySelector('.fit-label').textContent, 'Not enough information');
+  await h.clickSave(); assert.deepEqual(h.saves[0].profile, p); assert.equal(h.saves[0].source, 'rendered_profile');
 });
 await test('blocked search stays distinct from empty results and cannot save', async () => {
   const h = await open({kind: 'search', state: 'blocked', message: '', pageUrl: 'https://www.linkedin.com/search/results/people/', results: []});
@@ -147,20 +141,19 @@ await test('an already connected popup opens the ordinary app without a pairing 
   assert.equal(link.textContent, 'Open Mighty');
   assert.equal(link.getAttribute('href'), 'https://riteshmitsloan.github.io/mighty/');
 });
-await test('goal version refresh changes its result and preserves full supporting source text', async () => {
+await test('goal version refresh changes the selected compact assessment', async () => {
   const h = await open({kind:'profile',state:'ready',profile:profile(),message:''});
-  assert.match(h.document.querySelector('.goal-fit .fit-label').textContent, /supports/);
-  assert.match(h.document.querySelector('.assessment-sources').textContent, /END_SENTINEL/);
+  assert.equal(h.document.querySelector('.goal-fit .fit-label').textContent, 'Possible fit');
   h.goalContext = context([{...career,version:2,criteria:[{...career.criteria[0],terms:['aerospace']}]}]);
   await h.refresh('mighty:account_changed');
   assert.equal(h.document.querySelector('.goal-fit').dataset.goalVersion,'2');
-  assert.match(h.document.querySelector('.goal-fit .fit-label').textContent,/More evidence/);
+  assert.match(h.document.querySelector('.goal-fit .fit-label').textContent,/Not enough information/);
   assert.equal(h.document.querySelector('.assessment-sources'),null);
 });
 await test('empty saved goals show the account-save instruction and never score search snippets', async () => {
   const h = await open({kind:'profile',state:'ready',profile:profile(),message:''},{goalContext:context([])});
   assert.equal(h.document.querySelector('.goal-fit'),null);
-  assert.match(h.document.body.textContent,/Save goal to account/);
+  assert.match(h.document.body.textContent,/Save a goal to your account/);
   h.snapshot = search(); await h.refresh();
   assert.equal(h.document.querySelector('.goal-fit'),null);
   assert.equal(h.document.querySelectorAll('.result').length,7);
@@ -175,7 +168,7 @@ await test('account change during an in-flight save clears old goals immediately
   assert.doesNotMatch(h.document.body.textContent,/Healthcare career/);
   release();await tick();await tick();
   assert.equal(h.saves[0].userId,owner);
-  assert.match(h.document.querySelector('.goal-fit').textContent,/Second account only/);
+  assert.match(h.document.querySelector('.goal-pill[aria-pressed="true"]').textContent,/Second account only/);
   assert.doesNotMatch(h.document.querySelector('#notice').textContent,/Saved|Saving/);
   assert.doesNotMatch(h.document.body.textContent,/Healthcare career/);
 });
@@ -185,9 +178,9 @@ await test('an old failed refresh cannot erase a newly connected account view', 
   await h.refresh();
   h.statusWait=null;h.statusFailure=false;h.userId=other;h.goalContext=context([{...fundraising,title:'New owner goal'}],other);
   await h.refresh('mighty:account_changed');
-  assert.match(h.document.querySelector('.goal-fit').textContent,/New owner goal/);
+  assert.match(h.document.querySelector('.goal-pill[aria-pressed="true"]').textContent,/New owner goal/);
   release();await tick();
-  assert.match(h.document.querySelector('.goal-fit').textContent,/New owner goal/);
+  assert.match(h.document.querySelector('.goal-pill[aria-pressed="true"]').textContent,/New owner goal/);
   assert.doesNotMatch(h.document.querySelector('#notice').textContent,/Old refresh failed/);
 });
 await test('focus while saving performs its deferred account-goal refresh after save', async () => {

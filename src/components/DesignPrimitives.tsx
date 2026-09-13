@@ -1,5 +1,6 @@
-import {useEffect, useId, useRef, type ReactNode} from 'react';
+import {useEffect, useId, useRef, useState, type ReactNode} from 'react';
 import {X} from 'lucide-react';
+import {canonicalProfilePhotoUrl} from '../lib/profile-photo';
 
 export function MightyMark({className = ''}: {className?: string}) {
   return <span className={`mighty-mark ${className}`} aria-hidden="true"><span/><span/></span>;
@@ -9,8 +10,12 @@ export function initials(name: string) {
   return name.trim().split(/\s+/).slice(0, 2).map(part => part[0]).join('').toUpperCase() || '·';
 }
 
-export function Avatar({name, size = 'regular', tone = 0}: {name: string; size?: 'small' | 'regular' | 'large'; tone?: number}) {
-  return <span className={`avatar avatar-${size} avatar-tone-${tone % 5}`} aria-hidden="true">{initials(name)}</span>;
+export function Avatar({name, photoUrl, size = 'regular', tone = 0}: {name: string; photoUrl?: string | null; size?: 'small' | 'regular' | 'large'; tone?: number}) {
+  const source=canonicalProfilePhotoUrl(photoUrl),identity=`${name}\0${source||''}`;
+  const [failed,setFailed]=useState<string|null>(null);
+  return <span className={`avatar avatar-${size} avatar-tone-${tone % 5}`} aria-hidden="true">{source&&failed!==identity
+    ? <img key={identity} src={source} alt="" referrerPolicy="no-referrer" loading="lazy" decoding="async" onError={()=>setFailed(identity)} style={{width:'100%',height:'100%',objectFit:'cover',borderRadius:'inherit',display:'block'}}/>
+    : initials(name)}</span>;
 }
 
 export function Tabs<T extends string>({label, items, value, onChange}: {label: string; items: readonly T[]; value: T; onChange: (value: T) => void}) {

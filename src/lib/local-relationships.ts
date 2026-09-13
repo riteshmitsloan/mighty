@@ -1,6 +1,7 @@
 import type {Person,Capture} from './workspace';
 import type {PersonInput} from './data-access';
 import {cleanText} from './text';
+import {canonicalProfilePhotoUrl} from './profile-photo';
 
 export interface LocalRelationshipState {people:Person[];events:Capture[];observations:unknown[];drafts:unknown[]}
 const empty=():LocalRelationshipState=>({people:[],events:[],observations:[],drafts:[]});
@@ -31,7 +32,8 @@ export const updateLocalRelationships=store.update;
 export function insertLocalPerson(state:LocalRelationshipState,input:PersonInput,url:string|null):string{
  const name=cleanText(input.person).trim();if(!name||name.length>200)throw Error('Enter a name under 200 characters.');
  const existing=url?state.people.find(person=>person.profile_url===url):undefined;if(existing)return existing.id;
- const id=crypto.randomUUID();state.people.unshift({id,person:name,profile_url:url,stage:'saved',created_at:new Date().toISOString(),context:{saveReason:cleanText(input.reason),source:input.source||'manual',company:input.company||'',position:input.position||'',...(input.searchHeadline?{searchHeadline:cleanText(input.searchHeadline).slice(0,2000)}:{}),...(input.searchSnippet?{searchSnippet:cleanText(input.searchSnippet).slice(0,8000)}:{}),profileComplete:false}});return id;
+ const photoUrl=canonicalProfilePhotoUrl(input.photoUrl);
+ const id=crypto.randomUUID();state.people.unshift({id,person:name,profile_url:url,stage:'saved',created_at:new Date().toISOString(),context:{saveReason:cleanText(input.reason),source:input.source||'manual',company:input.company||'',position:input.position||'',...(photoUrl?{photoUrl}:{}),...(input.searchHeadline?{searchHeadline:cleanText(input.searchHeadline).slice(0,2000)}:{}),...(input.searchSnippet?{searchSnippet:cleanText(input.searchSnippet).slice(0,8000)}:{}),profileComplete:false}});return id;
 }
 export function insertLocalCapture(state:LocalRelationshipState,personId:string,kind:string,body='',relatedId?:string):void{
  if(!state.people.some(person=>person.id===personId))throw Error('This person is no longer in this workspace.');

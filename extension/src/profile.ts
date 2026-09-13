@@ -1,6 +1,7 @@
 import{firstRendered,rendered,textOf}from'./dom.js';
 import{currentExperienceFields}from'./experience-fields.js';
 import{canonicalProfileURL,isSearchURL}from'./urls.js';
+import{canonicalProfilePhotoUrl}from'../../src/lib/profile-photo';
 import type{Anchor,AnchorKind,PageSnapshot,PageState,Profile,SearchResult}from'./types.js';
 export function blockedState(doc:Document,url:string,status=200):PageState|null{
  let path='';try{path=new URL(url).pathname.toLowerCase();}catch{return 'unknown';}
@@ -58,7 +59,7 @@ function recentActivityDate(item:Element,now:string):string|null{
 }
 /** SDUI has no h1. A generic h2 is not an identity anchor: require the profile's
  * own verification marker inside its top card and primary content region. */
-function sduiSubject(main:Element,profileUrl:string):{heading:Element;top:Element;scope:Element}|null{
+function sduiSubject(main:Element,profileUrl:string):{heading:Element;top:Element;scope:Element;card:Element}|null{
  const primary=Array.from(main.querySelectorAll('section[aria-label="Primary content"]')).filter(rendered);
  if(primary.length!==1)return null;
  const scope=primary[0];
@@ -77,7 +78,43 @@ function sduiSubject(main:Element,profileUrl:string):{heading:Element;top:Elemen
  const heading=headings[0],top=heading.closest('section');
  if(!top||top===scope||!card.contains(top)||!rendered(top))return null;
  if(markers.some(marker=>!marker.contains(heading)||marker.closest('section')!==top))return null;
- return{heading,top,scope};
+ return{heading,top,scope,card};
+}
+/** Ownership controls must come from this verified card, never the page sidebar. */
+export function profileTopCard(doc:Document,url:string):Element|null{
+ const profileUrl=canonicalProfileURL(url),main=doc.querySelector('main');if(!profileUrl||!main||blockedState(doc,url))return null;
+ const headings=Array.from(main.querySelectorAll('h1')).filter(rendered);
+ if(headings.length){if(headings.length!==1||!textOf(headings[0],Infinity))return null;const top=headings[0].closest('section');return top&&main.contains(top)&&rendered(top)?top:null;}
+ const subject=sduiSubject(main,profileUrl);return subject&&textOf(subject.heading,Infinity)?subject.card:null;
+}
+/** A cover, employer logo or recommendation image is not this person's photo. */
+function profilePhoto(top:Element,name:string,profileUrl:string,sduiCard?:Element):string|null{
+ const normalized=(value:string)=>value.normalize('NFKC').replace(/[’‘]/g,"'").replace(/\s+/g,' ').trim().toLocaleLowerCase('en-US');
+ const subject=normalized(name),labels=new Set([subject,subject+"'s profile picture",subject+"'s profile photo",'profile picture of '+subject,'profile photo of '+subject]);
+ const matches=new Set<string>();
+ const scope=sduiCard||top;
+ for(const element of scope.querySelectorAll('img')){
+  if(!rendered(element)||(!sduiCard&&element.closest('section')!==top))continue;
+  const img=element as HTMLImageElement;
+  if(typeof img.naturalWidth==='number'&&img.naturalWidth===0)continue;
+  const alt=normalized(element.getAttribute('alt')||'');
+  const reference=element.closest('a[componentkey="topcard-logo-image-referencekey"]');
+  const photoContainer=element.closest('[aria-label="Profile photo"][componentkey="topcard-logo-image-referencekey"]');
+  const sduiPhoto=Boolean(reference&&photoContainer&&scope.contains(reference)&&scope.contains(photoContainer)&&reference.contains(photoContainer)
+   &&canonicalProfileURL(reference.getAttribute('href')||'',profileUrl)===profileUrl&&element.getAttribute('data-loaded')==='true');
+  // SDUI may place the subject photo in a sibling top-card subsection. Only its
+  // explicit, URL-bound photo reference permits crossing the name-section boundary.
+  if(element.closest('section')!==top&&!sduiPhoto)continue;
+  const explicit=sduiPhoto||element.matches('.pv-top-card-profile-picture__image,.profile-photo-edit__preview,[data-field="profile-photo"]');
+  // An explicit photo selector may have an empty decorative alt, but a different
+  // named alt is contradictory and must never be adopted as the subject's face.
+  if(!labels.has(alt)&&!(explicit&&!alt))continue;
+  const link=element.closest('a[href]')?.getAttribute('href');
+  if(link){try{const target=new URL(link,profileUrl);if(/\/in\//.test(target.pathname)&&canonicalProfileURL(target.href)!==profileUrl&&!target.href.startsWith(profileUrl))continue;}catch{continue;}}
+  const photo=canonicalProfilePhotoUrl(img.currentSrc||element.getAttribute('src'));
+  if(photo)matches.add(photo);
+ }
+ return matches.size===1?[...matches][0]:null;
 }
 export function readProfile(doc:Document,url:string,now=new Date().toISOString()):Profile|null{
  const profileUrl=canonicalProfileURL(url),main=doc.querySelector('main');if(!profileUrl||!main||blockedState(doc,url))return null;
@@ -122,7 +159,8 @@ export function readProfile(doc:Document,url:string,now=new Date().toISOString()
   }
  }
  const missingSections:AnchorKind[]=(['experience','education','location','skills','languages','certifications','activity'] as AnchorKind[]).filter(kind=>!anchors.some(anchor=>anchor.kind===kind));
- const profile:Profile={profileUrl,name,anchors,profileReadAt:null,truncated:truncationReasons.length>0,truncationReasons,missingSections};
+ const photoUrl=profilePhoto(top,name,profileUrl,'card'in subject?subject.card:undefined);
+ const profile:Profile={profileUrl,name,...(photoUrl?{photoUrl}:{}),anchors,profileReadAt:null,truncated:truncationReasons.length>0,truncationReasons,missingSections};
  profile.profileReadAt=!truncationReasons.length&&hasSubstantiveProfile(profile)?now:null;
  if(new TextEncoder().encode(JSON.stringify(profile)).byteLength>49152){profile.truncationReasons.push('snapshot_size_limit');profile.truncated=true;profile.profileReadAt=null;}
  return profile;

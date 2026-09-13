@@ -86,6 +86,31 @@ async function moduleAssertions(db: PGlite, t: import('node:test').TestContext) 
   await db.query(`insert into public.outreach_inbox(id,user_id,operation_id,profile_url,person,snapshot,profile_read_at) values($1,$2,$3,$4,'Module Person',$5::jsonb,$6)`,[id,A,crypto.randomUUID(),url,JSON.stringify(snapshot),observedAt]);return id;
  }
  async function consume(id:string){return (await db.query<any>('select public.consume_inbox($1) as id',[id])).rows[0].id as string;}
+ await t.test('a LinkedIn photo survives the real inbox SQL and a later photo-less read without editing source history',async()=>{
+  let relationship='';
+  await asUser(A,async()=>{
+   const url='https://www.linkedin.com/in/photo-contract-fixture/',at='2026-09-12T12:00:00Z';
+   const photoUrl='https://media.licdn.com/dms/image/v2/SYNTHETIC_PHOTO/profile-displayphoto-shrink_100_100/0/1?e=1800000000&v=beta&t=synthetic_signature';
+   const profile:Profile={name:'Module Person',profileUrl:url,photoUrl,profileReadAt:at,truncated:false,truncationReasons:[],anchors:[{kind:'about',text:'Synthetic source evidence.',sourceUrl:url+'#about',observedAt:at}]};
+   const first=inboxPayload({operationId:crypto.randomUUID(),userId:A,profile,source:'rendered_profile'});
+   const item=await enqueue(first.snapshot,first.profile_read_at,url);relationship=await consume(item);
+   assert.equal(await consume(item),relationship,'Retry consumes the same relationship.');
+   const {photoUrl:_photo,...withoutPhoto}=profile;
+   const later=inboxPayload({operationId:crypto.randomUUID(),userId:A,profile:{...withoutPhoto,profileReadAt:'2026-09-13T12:00:00Z'},source:'rendered_profile'});
+   assert.equal(await consume(await enqueue(later.snapshot,later.profile_read_at,url)),relationship);
+   const people=(await db.query<any>('select * from public.outreach_log where id=$1',[relationship])).rows;
+   const reads=(await db.query<any>('select * from public.profile_reads where relationship_id=$1',[relationship])).rows;
+   assert.equal(reads.length,2);assert.equal(people[0].context.profile.photoUrl,photoUrl);
+   assert.deepEqual(reads.find(row=>row.inbox_id===item).snapshot,first.snapshot);
+   const server=new MemoryServer({outreach_log:people,profile_reads:reads});server.actor=A;
+   const loaded=(await readRelationshipData(server.client,A)).people[0];
+   assert.deepEqual(loaded.profile,later.snapshot);assert.equal(loaded.photoUrl,photoUrl);
+  });
+  await asUser(B,async()=>{
+   assert.equal((await db.query('select * from public.profile_reads where relationship_id=$1',[relationship])).rows.length,0);
+   assert.equal((await db.query('select * from public.outreach_log where id=$1',[relationship])).rows.length,0);
+  });
+ });
  await t.test('current extension snapshot stays complete through inbox SQL, account reading and person assessment',async()=>{
   await asUser(A,async()=>{
    const url='https://www.linkedin.com/in/current-contract-fixture/',at='2026-09-12T13:00:00Z';

@@ -1,6 +1,6 @@
 import type {GatewayCall} from './platform';
 import {companyKey,companyOverlapFor,type CompanyOverlap} from './archive';
-export type Connection={id?:string;person:string;profile_url?:string|null;company?:string;position?:string;role?:string;connectedOn?:string;context?:Record<string,unknown>;companyOverlap?:CompanyOverlap|null};
+export type Connection={id?:string;person:string;profile_url?:string|null;company?:string;position?:string;role?:string;connectedOn?:string;context?:Record<string,unknown>;companyOverlap?:CompanyOverlap|null;photoUrl?:string};
 export type NetworkMatch={person:Connection;reason:string;matchedTerms:string[];sharedEmployer:string|null;connectionAgeDays:number|null;companyOverlap:CompanyOverlap|null};
 /** Only an explicit company and a well-formed imported fact can establish overlap. */
 export function verifiedCompanyOverlap(company:string|undefined,value:unknown):CompanyOverlap|null{

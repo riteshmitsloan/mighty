@@ -11,7 +11,7 @@ import {readAccountSourceData, type AccountSourceFacts} from './account-sources'
 import {readLocalRelationships,updateLocalRelationships,insertLocalPerson,insertLocalCapture} from './local-relationships';
 export { localSources, keepLocal } from './local-sources';
 
-export interface Person { id:string;person:string;profile_url:string|null;stage:string;context:Record<string,unknown>;created_at:string; profile?:Record<string,unknown> }
+export interface Person { id:string;person:string;profile_url:string|null;stage:string;context:Record<string,unknown>;created_at:string; profile?:Record<string,unknown>;photoUrl?:string }
 export interface Capture { id:string;relationship_id:string;kind:string;body:string;related_event_id:string|null;created_at:string;user_id?:string;goal_id?:string|null;goal_version?:number|null;request_id?:string|null;due_at?:string|null }
 export interface LocalSources { archive?:ArchiveResult;resume?:ResumeExtraction;mailbox?:MailboxWorkerResult;strategy?:string;knowledge?:KnowledgeState;accountFacts?:AccountSourceFacts }
 export function canonicalProfile(value:string){if(!value.trim())return null;let url:URL;try{url=new URL(/^https?:/i.test(value)?value:`https://${value}`);}catch{throw Error('Enter a LinkedIn profile, such as linkedin.com/in/your-name.');}if(!['www.linkedin.com','linkedin.com'].includes(url.hostname)||!/^\/in\/[^/?#]+\/?$/.test(url.pathname))throw Error('Use a LinkedIn profile link.');return `https://www.linkedin.com${url.pathname.replace(/\/$/,'')}/`;}

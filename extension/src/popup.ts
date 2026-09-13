@@ -1,8 +1,8 @@
-import {assessProfileGoals} from './goal-assessment.js';
+import {compactProfile, COMPACT_PROFILE_CSS} from './compact-profile.js';
 import {mightyAppLink} from './app-link.js';
 import type {AccountGoalContext} from './goal-context.js';
 import {initialSelection, toggleSelection} from './selection.js';
-import type {AnchorKind, PageSnapshot, Profile, SaveInput} from './types.js';
+import type {PageSnapshot, Profile, SaveInput} from './types.js';
 
 const body = document.querySelector('#content')!;
 const account = document.querySelector('#account')!;
@@ -16,11 +16,8 @@ let refreshPending = false, goalRefreshPending = false, lastRefreshError = '';
 let accountEpoch = 0;
 let connected = false, selected = new Set<string>(), saving = false, readGeneration = 0;
 const operations = new Map<string, SaveInput>();
-const sectionLabels: Record<AnchorKind, string> = {
-  headline: 'Headline', location: 'Location', about: 'About', experience: 'Experience',
-  education: 'Education', skills: 'Skills', languages: 'Languages', certifications: 'Licenses & certifications',
-  activity: 'Activity', timing: 'Timing',
-};
+let selectedGoalId: string | null = null;
+const profileStyle = document.createElement('style'); profileStyle.textContent = COMPACT_PROFILE_CSS; document.head.append(profileStyle);
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, text?: string, cls?: string) {
   const node = document.createElement(tag);
@@ -76,94 +73,12 @@ function pageNotice(snapshot: PageSnapshot) {
   return snapshot.profile?.profileReadAt || snapshot.profile?.truncated ? '' : 'Wait for the profile sections to load, then reopen Mighty.';
 }
 
-function anchorText(text: string) {
-  // Only generated display labels change. Stored evidence and dates remain intact.
-  return text.replace(/^Rendered activity timestamp:/, 'Activity date:')
-    .replace(/^Recent rendered activity:/, 'Recent activity:');
-}
-
-function renderGoalAssessments() {
-  const section = el('section', undefined, 'account-goals');
-  section.append(el('h2', 'Account goals'));
-  if (!connected || !userId || !goalContext) {
-    section.append(el('p', 'Reconnect from Mighty to load your saved goals. No previous account context is used.', 'hint'));
-    body.append(section); return;
-  }
-  try {
-    const result = assessProfileGoals(userId, goalContext, state);
-    if (result.state !== 'ready') {section.append(el('p', result.message, 'hint')); body.append(section); return;}
-    section.append(el('p', 'Profile evidence only. Self evidence and shared-employer routes aren’t included.', 'hint'));
-    for (const [index, {goal, assessment}] of result.assessments.entries()) {
-      const card = el('details', undefined, 'goal-fit');
-      card.open = index === 0;
-      card.dataset.goalId = goal.id;
-      card.dataset.goalVersion = String(goal.version);
-      card.append(el('summary', goal.title));
-      card.append(el('p', `Saved version ${goal.version}`, 'hint goal-version'));
-      for (const reason of assessment.reasons) card.append(el('p', reason, 'reason'));
-      if (!assessment.reasons.length) card.append(el('p', 'The visible evidence does not yet establish this goal’s criteria.', 'reason'));
-      const label = el('span', assessment.label, 'fit-label');
-      label.dataset.fit = assessment.status === 'unknown' ? 'insufficient' : assessment.status === 'contradicted' || assessment.status === 'conflicting' ? 'none' : 'overlap';
-      card.append(label);
-      if (assessment.unknowns.length) {
-        card.append(el('h3', 'Still unknown'));
-        const unknowns = el('ul', undefined, 'goal-unknowns');
-        for (const unknown of assessment.unknowns) unknowns.append(el('li', unknown));
-        card.append(unknowns);
-      }
-      const evidenceIds = new Set(assessment.reasonDetails.flatMap(reason => reason.claimIds));
-      const evidence = result.candidate.claims.filter(claim => evidenceIds.has(claim.id));
-      if (evidence.length) {
-        const sources = el('details', undefined, 'assessment-sources');
-        sources.append(el('summary', 'Supporting source text'));
-        for (const claim of evidence) {
-          const fact = el('div');
-          fact.append(el('p', claim.text));
-          const source = el('a', claim.sourceLabel);
-          source.href = claim.sourceRef!; source.target = '_blank'; source.rel = 'noopener noreferrer';
-          fact.append(source, el('p', `Observed ${claim.observedAt}`, 'hint'));
-          sources.append(fact);
-        }
-        card.append(sources);
-      }
-      section.append(card);
-    }
-  } catch {section.replaceChildren(el('p', 'Saved goals could not be verified. Reconnect from Mighty to refresh them.', 'warning'));}
-  body.append(section);
-}
-
-function renderProfile(profile: Profile) {
-  body.append(el('h1', profile.name));
-  const headline = profile.anchors.find(anchor => anchor.kind === 'headline');
-  if (headline) body.append(el('p', headline.text, 'profile-headline'));
-
-  renderGoalAssessments();
-
-  if (profile.truncated) body.append(el('p', 'This read exceeds the save limit. Its full context cannot be saved.', 'warning'));
-  const timing = profile.anchors.filter(anchor => anchor.kind === 'timing');
-  const timingCard = el('section', undefined, 'evidence-section');
-  timingCard.append(el('h2', 'Timing'));
-  if (timing.length) for (const anchor of timing) timingCard.append(el('p', anchorText(anchor.text)));
-  else timingCard.append(el('p', 'No visible activity dates or role timing.', 'hint'));
-  body.append(timingCard);
-
-  const groups = new Map<AnchorKind, string[]>();
-  for (const anchor of profile.anchors) {
-    if (anchor.kind === 'timing' || anchor === headline) continue;
-    const texts = groups.get(anchor.kind) || [];
-    texts.push(anchor.text);
-    groups.set(anchor.kind, texts);
-  }
-  for (const [kind, texts] of groups) {
-    const section = el('section', undefined, 'evidence-section');
-    section.append(el('h2', sectionLabels[kind]));
-    for (const text of texts) section.append(el('p', text));
-    body.append(section);
-  }
-  if (profile.missingSections?.length) {
-    const missing = el('details', undefined, 'missing-sections');
-    missing.append(el('summary', 'Not visible in this read'), el('p', profile.missingSections.map(kind => sectionLabels[kind]).join(', ') + '.'));
-    body.append(missing);
+function renderProfile(_profile: Profile) {
+  body.append(compactProfile(document, {page: state, connected, userId, goalContext, selectedGoalId,
+    onSelect: id => {selectedGoalId = id; render(); body.querySelector<HTMLButtonElement>('.goal-pill[aria-pressed="true"]')?.focus();}}));
+  if (connected && !goalContext) {
+    const retry = el('button', 'Try again', 'retry-goals'); retry.type = 'button';
+    retry.addEventListener('click', () => void refresh(true)); body.append(retry);
   }
 }
 
@@ -229,7 +144,7 @@ async function refresh(refreshGoals = false) {
     if (generation !== readGeneration) return;
     if (accountResult.status === 'rejected') throw accountResult.reason;
     const status = accountResult.value;
-    if (userId !== status.userId) {accountEpoch++; operations.clear(); selected.clear();}
+    if (userId !== status.userId) {accountEpoch++; operations.clear(); selected.clear(); selectedGoalId = null;}
     userId = status.userId;
     goalContext = status.connected ? status.goalContext ?? null : null;
     connected = status.connected;
