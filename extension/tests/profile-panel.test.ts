@@ -6,6 +6,7 @@ import {build} from 'esbuild';
 import {createProfilePanel, relevantPageMutation, supportedPanelURL} from '../src/profile-panel.js';
 import {compactFit, profileIdentity} from '../src/compact-profile.js';
 import {profilePanelEligibility} from '../src/panel-eligibility.js';
+import {loadPanelFont, PANEL_FONT_FAMILY} from '../src/panel-font.js';
 import {accountGoalContext} from '../src/goal-context.js';
 import {assessCandidate} from '../../src/lib/assessment';
 import {createEvidenceClaim} from '../../src/lib/evidence';
@@ -93,6 +94,39 @@ test('profile avatars permit only validated LinkedIn media and fall back to init
  const {document}=parseHTML('<html><body></body></html>');const p={...profile(),photoUrl:'https://media.licdn.com/dms/image/v2/ABC/profile-displayphoto-shrink_100_100/test?e=1&v=beta&t=signature'};
  const row=profileIdentity(document,p);const image=row.querySelector('img')!;assert.ok(image);assert.equal(image.referrerPolicy,'no-referrer');image.dispatchEvent(new document.defaultView.Event('error'));assert.equal(row.querySelector('.profile-avatar')?.textContent,'FP');
  assert.equal(profileIdentity(document,{...p,photoUrl:'https://evil.example/photo.png'}).querySelector('img'),null);
+});
+test('panel loads the bundled font once per document and keeps font failures nonblocking',async()=>{
+ const fonts=new Set<any>();let loads=0;
+ class Font {family:string;constructor(family:string,public source:string,public descriptors:unknown){this.family=family;}load(){loads++;return Promise.reject(Error('Font unavailable'));}}
+ const document={fonts} as unknown as Document;
+ loadPanelFont(document,'chrome-extension://fixture/assets/mighty-ui.woff2',Font as any);
+ loadPanelFont(document,'chrome-extension://fixture/assets/mighty-ui.woff2',Font as any);
+ await tick();assert.equal(fonts.size,1);assert.equal(loads,1);assert.equal([...fonts][0].family,PANEL_FONT_FAMILY);assert.match([...fonts][0].source,/mighty-ui\.woff2/);
+ assert.doesNotThrow(()=>loadPanelFont({} as Document,'font',undefined));
+});
+test('panel stays top-right with an explicit sans-serif surface and reopens the same host',async()=>{
+ const h=await harness();try{
+  const css=h.panel.shadow.querySelector('style')!.textContent!;
+  assert.match(css,/:host\{[^}]*top:82px;right:22px;bottom:auto/);
+  assert.match(css,/\.surface\{font:14px\/1\.5 'Mighty Panel Schibsted',Arial,Helvetica,sans-serif/);
+  assert.doesNotMatch(css,/@font-face|bottom:24px/);
+  h.find('.skip').click();h.panel.open();assert.ok(h.find('.save'));assert.equal(h.document.querySelectorAll('#mighty-profile-panel').length,1);
+  h.ports[0].emit({type:'mighty:panel_rejected',message:'Refresh this page. (panel_route_changed)'});
+  assert.match(h.find('.notice').textContent||'',/panel_route_changed/);
+ }finally{h.panel.dispose();}
+});
+test('successful status recovery clears only the connection diagnostic, preserving save and read failures',async()=>{
+ const h=await harness();try{
+  const reject=()=>h.ports[0].emit({type:'mighty:panel_rejected',message:'Refresh this page. (panel_route_changed)'});
+  reject();h.ports[0].emit({type:'mighty:ready',protocol:1});
+  assert.match(h.find('.content').textContent||'',/panel_route_changed/);
+  await h.panel.refreshAccount();assert.equal(h.find('.account-state').textContent,'Account connected');assert.equal(h.find('.notice'),null);
+  h.state.fail=true;h.find('.save').click();await tick();reject();
+  assert.match(h.find('.content').textContent||'',/Save pending/);assert.match(h.find('.content').textContent||'',/panel_route_changed/);
+  await h.panel.refreshAccount();assert.match(h.find('.notice').textContent||'',/Save pending/);assert.doesNotMatch(h.find('.content').textContent||'',/panel_route_changed/);
+  h.state.readError=true;h.panel.readPage();reject();await h.panel.refreshAccount();
+  assert.match(h.find('.notice').textContent||'',/profile could not be read/);assert.doesNotMatch(h.find('.content').textContent||'',/panel_route_changed/);
+ }finally{h.panel.dispose();}
 });
 test('observer ignores panel-only mutations while retaining actual page changes',async()=>{
  const h=await harness();try{

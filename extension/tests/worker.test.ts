@@ -44,7 +44,7 @@ test('worker verifies handoff, reads account goals with RLS bearer, and limits g
   assert.equal(h.calls[1].url.searchParams.get('user_id'),'eq.'+uid);assert.equal(h.calls[1].headers.get('Authorization'),h.calls[0].headers.get('Authorization'));
   const status=await h.send({type:'mighty:status'});assert.equal(status.goalContext.userId,uid);assert.equal(status.goalContext.goals[0].id,goal.id);assert.equal(status.accessToken,undefined);
   const external=await h.send({type:'mighty:status',protocol:1},true);assert.equal(external.goalContext,undefined);assert.equal(external.goalCount,1);
-  let replied=false;h.events.internal({type:'mighty:status'},{id:h.chrome.runtime.id,url:'https://www.linkedin.com/in/person/',tab:{id:4}},()=>{replied=true;});assert.equal(replied,false);
+  let refused:any;h.events.internal({type:'mighty:status'},{id:h.chrome.runtime.id,url:'https://www.linkedin.com/in/person/',tab:{id:4}},(value:any)=>{refused=value;});assert.equal(refused.ok,false);assert.equal(refused.code,'panel_frame_not_top');assert.equal(refused.goalContext,undefined);
   assert.deepEqual(h.access.sort(),['local:TRUSTED_CONTEXTS','session:TRUSTED_CONTEXTS']);
 });
 test('verified replacement with foreign goal rows keeps only its new identity and no old goals',async()=>{
@@ -127,12 +127,13 @@ test('an isolated top-frame profile or people-search panel receives public goals
  }
  assert.equal(h.calls.length,2);
 });
-test('untrusted senders, frames and unsupported URLs receive no goals and trigger no requests',async()=>{
+test('untrusted senders, frames and unsupported current URLs receive no goals and trigger no requests',async()=>{
  const h=runtime();await h.connect();const valid=contentSender(h);
- const bad=[{...valid,id:'other-extension'},{...valid,frameId:1},{...valid,frameId:undefined},{...valid,origin:'https://evil.example'},{...valid,documentLifecycle:'prerender'},{...valid,tab:{id:4}},{...valid,tab:{id:5,url:'https://www.linkedin.com/in/another/'}},{...valid,tab:{id:-1,url:valid.url}}];
- for(const url of ['https://www.linkedin.com/feed/','https://www.linkedin.com/messaging/','https://evil.example/in/person/','https://www.linkedin.com.evil.example/in/person/','http://www.linkedin.com/in/person/','https://www.linkedin.com:8443/search/results/people/','https://name@www.linkedin.com/search/results/people/'])bad.push({...valid,url,tab:{id:4,url}});
- bad.push({...valid,url:h.chrome.runtime.getURL('popup.html')});
- for(const sender of bad){let replied=false;assert.equal(h.events.internal({type:'mighty:status',refreshGoals:true},sender,()=>{replied=true;}),undefined);assert.equal(replied,false);}
+ const bad=[{...valid,id:'other-extension'},{...valid,frameId:1},{...valid,frameId:undefined},{...valid,origin:'https://evil.example'},{...valid,documentLifecycle:'prerender'},{...valid,tab:{id:-1,url:valid.url}},{...valid,url:h.chrome.runtime.getURL('popup.html')}];
+ for(const sender of bad){let reply:any;assert.equal(h.events.internal({type:'mighty:status',refreshGoals:true},sender,(value:any)=>{reply=value;}),undefined);if(sender.id===h.chrome.runtime.id){assert.equal(reply.ok,false);assert.equal(reply.goalContext,undefined);}else assert.equal(reply,undefined);}
+ for(const url of ['https://www.linkedin.com/feed/','https://www.linkedin.com/messaging/','https://evil.example/in/person/','https://www.linkedin.com.evil.example/in/person/','http://www.linkedin.com/in/person/','https://www.linkedin.com:8443/search/results/people/','https://name@www.linkedin.com/search/results/people/']){
+  h.state.tabUrl=url;const result=await fromContent(h,{type:'mighty:status',refreshGoals:true},valid);assert.equal(result.ok,false);assert.equal(result.goalContext,undefined);assert.equal(result.userId,undefined);
+ }
  await tick();assert.equal(h.calls.length,2);
 });
 test('content cannot access active-tab reads, replace an account, or disconnect it',async()=>{
@@ -155,10 +156,10 @@ test('panel saves retain the exact source and are bound to the sender profile, n
 test('search saves require the same current search route, never pretend to be profile reads and preserve unknowns',async()=>{
  const h=runtime();await h.connect();const search=saveInput('https://www.linkedin.com/in/search-person/','search_result');
  const wrong=await fromContent(h,{type:'mighty:save',save:search});assert.equal(wrong.ok,false);
- h.state.tabUrl='https://www.linkedin.com/search/results/people/?keywords=founder';const result=await fromContent(h,{type:'mighty:save',save:search});assert.equal(result.ok,true);
+ h.state.tabUrl='https://www.linkedin.com/search/results/people/?keywords=founder';const result=await fromContent(h,{type:'mighty:save',save:search,pageUrl:h.state.tabUrl});assert.equal(result.ok,true);
  const call=h.calls.find(row=>row.path==='/rest/v1/outreach_inbox')!;assert.deepEqual((call.body as any).snapshot.anchors,[]);assert.equal((call.body as any).profile_read_at,null);
  const profile=await fromContent(h,{type:'mighty:save',save:saveInput()});assert.equal(profile.ok,false);
- const old=contentSender(h);h.state.tabUrl='https://www.linkedin.com/search/results/people/?keywords=another';assert.equal((await fromContent(h,{type:'mighty:save',save:search},old)).ok,false);
+ const old=contentSender(h);h.state.tabUrl='https://www.linkedin.com/search/results/people/?keywords=another';assert.equal((await fromContent(h,{type:'mighty:save',save:search,pageUrl:old.url},old)).ok,false);
  assert.equal(h.calls.filter(row=>row.path==='/rest/v1/outreach_inbox').length,1);
 });
 test('a stale content sender cannot queue or deliver a save after the tab changes',async()=>{
@@ -168,10 +169,10 @@ test('a stale content sender cannot queue or deliver a save after the tab change
 test('panel ports are top-frame and route gated, acknowledge readiness and broadcast only safe change signals',async()=>{
  const h=runtime();await h.connect();const accepted=portFixture(h,contentSender(h));await tick();assert.deepEqual(accepted.messages,[{type:'mighty:ready',protocol:1}]);
  const wrong=portFixture(h,{...contentSender(h),frameId:1}),forgedPopup=portFixture(h,contentSender(h),'mighty:popup');assert.equal(wrong.state.disconnected,true);assert.equal(forgedPopup.state.disconnected,true);
- await h.send({type:'mighty:disconnect',protocol:1},true);assert.ok(accepted.messages.some(row=>row.type==='mighty:account_changed'));assert.deepEqual(wrong.messages,[]);assert.doesNotMatch(JSON.stringify(accepted.messages),/userId|goalContext|accessToken|unsigned-test/);
+ await h.send({type:'mighty:disconnect',protocol:1},true);assert.ok(accepted.messages.some(row=>row.type==='mighty:account_changed'));assert.equal(wrong.messages.length,1);assert.equal(wrong.messages[0].code,'panel_frame_not_top');assert.equal(wrong.messages[0].goalContext,undefined);assert.doesNotMatch(JSON.stringify(accepted.messages),/userId|goalContext|accessToken|unsigned-test/);
 });
 test('a panel port that changes route before verification never joins account notifications',async()=>{
- const h=runtime();let release!:()=>void;h.state.tabWait=new Promise(resolve=>{release=resolve;});const port=portFixture(h,contentSender(h));h.state.tabUrl='https://www.linkedin.com/feed/';release();await tick();assert.equal(port.state.disconnected,true);assert.deepEqual(port.messages,[]);
+ const h=runtime();let release!:()=>void;h.state.tabWait=new Promise(resolve=>{release=resolve;});const port=portFixture(h,contentSender(h));h.state.tabUrl='https://www.linkedin.com/feed/';release();await tick();assert.equal(port.state.disconnected,true);assert.equal(port.messages.length,1);assert.equal(port.messages[0].code,'panel_current_route_unsupported');assert.equal(port.messages[0].goalContext,undefined);
 });
 test('save HTTP401 disconnects the matching account while preserving an immutable pending save for retry',async()=>{
  const h=runtime();await h.connect();h.state.saveStatus=401;
@@ -242,4 +243,36 @@ test('actual worker invalidations and actual panel refreshes settle without recu
   h.state.goalFailure=false;await panel.refreshAccount(true);await settle();assert.equal(goals(),4);assert.equal(panel.shadow.querySelectorAll('.goal-pill').length,1);
   await settle();assert.equal(goals(),4);assert.doesNotMatch(JSON.stringify(transfers),/accessToken|Authorization|unsigned-test|sb_publishable_fixture/);
  }finally{panel.dispose();}
+});
+test('rejected own-extension status requests reveal only bounded sender diagnostics',async()=>{
+ const h=runtime();await h.connect();const valid=contentSender(h);
+ const cases:[Record<string,unknown>,string][]=[
+  [{...valid,frameId:1},'panel_frame_not_top'],
+  [{...valid,tab:undefined},'panel_tab_missing'],
+  [{...valid,url:'https://other.example/private/'},'panel_sender_url_unsupported'],
+  [{...valid,origin:'https://other.example'},'panel_origin_mismatch'],
+  [{...valid,documentLifecycle:'cached'},'panel_document_inactive'],
+ ];
+ for(const [sender,code] of cases){let reply:any;h.events.internal({type:'mighty:status'},sender,(value:any)=>{reply=value;});assert.equal(reply?.ok,false);assert.equal(reply?.code,code);assert.equal(reply?.connected,undefined);assert.equal(reply?.goalContext,undefined);assert.equal(reply?.userId,undefined);assert.doesNotMatch(JSON.stringify(reply),/https:|accessToken|unsigned-test|Fixture career|11111111|other\.example/);}
+ let unauthorized=false;h.events.internal({type:'mighty:status'},{...valid,id:'unrelated-extension'},()=>{unauthorized=true;});assert.equal(unauthorized,false);assert.equal(h.calls.length,2);
+});
+
+test('fresh current tab scopes permit stale or absent sender URL metadata after same-origin SPA navigation',async()=>{
+ const h=runtime();await h.connect();const current='https://www.linkedin.com/in/current-person/';h.state.tabUrl=current;
+ for(const url of ['https://www.linkedin.com/in/previous-person/','https://www.linkedin.com/feed/']){
+  const sender=contentSender(h,url);sender.tab.url='https://www.linkedin.com/in/older-document/';
+  const status=await fromContent(h,{type:'mighty:status'},sender);assert.equal(status.ok,true);assert.equal(status.connected,true);assert.equal(status.goalContext.userId,uid);assert.equal(status.appOrigin,config.appOrigins[0]);
+  const port=portFixture(h,sender);await tick();assert.equal(port.state.disconnected,false);assert.equal(port.messages[0].type,'mighty:ready');port.port.disconnect();
+  const wrong=await fromContent(h,{type:'mighty:save',save:saveInput(url)},sender);assert.equal(wrong.ok,false);
+ }
+ const missing={...contentSender(h),tab:{id:4}};const status=await fromContent(h,{type:'mighty:status'},missing as any);assert.equal(status.ok,true);
+ const saved=await fromContent(h,{type:'mighty:save',save:saveInput(current)},missing as any);assert.equal(saved.ok,true);
+ assert.equal(h.calls.filter(call=>call.path==='/rest/v1/outreach_inbox').length,1);
+ assert.equal((h.calls.find(call=>call.path==='/rest/v1/outreach_inbox')!.body as any).profile_url,current);
+});
+test('a different supported profile reached during a goal request cannot inherit the previous request',async()=>{
+ const h=runtime();await h.connect();let release!:()=>void;h.state.goalWait=new Promise(resolve=>{release=resolve;});
+ const sender=contentSender(h,'https://www.linkedin.com/in/initial-document/');
+ const request=fromContent(h,{type:'mighty:status',refreshGoals:true},sender);await tick();h.state.tabUrl='https://www.linkedin.com/in/next-person/';release();
+ const result=await request;assert.equal(result.ok,false);assert.equal(result.code,'panel_current_route_changed');assert.equal(result.goalContext,undefined);assert.equal(result.userId,undefined);
 });

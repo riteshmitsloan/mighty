@@ -1,0 +1,125 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {compactFit, compactProfile} from '../src/compact-profile.js';
+import {assessProfileGoals, hasGoalCriteria} from '../src/goal-assessment.js';
+import {accountGoalContext} from '../src/goal-context.js';
+import {assessCandidate} from '../../src/lib/assessment';
+import {createEvidenceClaim} from '../../src/lib/evidence';
+import {createGoal, type Goal, type GoalCriterion} from '../../src/lib/goals';
+import type {PageSnapshot, Profile} from '../src/types.js';
+
+const {parseHTML} = createRequire(import.meta.url)('linkedom');
+const uid = '11111111-1111-4111-a111-111111111111', at = '2026-09-13T12:00:00.000Z';
+const url = 'https://www.linkedin.com/in/synthetic-person/';
+const makeGoal = (kind: Goal['kind'], criteria: GoalCriterion[] = []) => createGoal({kind,
+  title: kind === 'career' ? 'Find a CEO role' : 'Raise a seed round',
+  outcome: kind === 'career' ? 'A leadership role in healthcare in London.' : 'Find investors for a seed round.', criteria},
+  {id: '22222222-2222-4222-a222-222222222222', now: at});
+const criterion = (field: GoalCriterion['field'], terms: string[], appliesTo: GoalCriterion['appliesTo'] = 'contact'): GoalCriterion =>
+  ({id: field, field, terms, appliesTo, label: field === 'location' ? 'Target location' : 'Target role', importance: 'required', origin: 'user'});
+const profile: Profile = {profileUrl: url, name: 'Synthetic Person', profileReadAt: at, truncated: false, truncationReasons: [], anchors: [
+  {kind: 'headline', text: 'Exploring CEO roles and seed investing', sourceUrl: url + '#profile', observedAt: at},
+  {kind: 'location', text: 'London', sourceUrl: url + '#profile', observedAt: at},
+  {kind: 'about', text: 'Healthcare experience and professional interests.', sourceUrl: url + '#about', observedAt: at},
+]};
+const page: PageSnapshot = {kind: 'profile', state: 'ready', profile, message: ''};
+const context = (goal: Goal) => accountGoalContext(uid, [{id: goal.id, user_id: uid, version: goal.version, document: goal}], at);
+function rendered(goal: Goal, snapshot: PageSnapshot = page, owner = uid) {
+  const {document} = parseHTML('<html><body></body></html>');
+  return compactProfile(document, {page: snapshot, connected: true, userId: owner, goalContext: context(goal), selectedGoalId: goal.id, onSelect() {}});
+}
+
+test('title-only career and fundraising goals request details instead of blaming each read profile', () => {
+  for (const kind of ['career', 'fundraising'] as const) {
+    const goal = makeGoal(kind), before = structuredClone({goal, profile});
+    const result = assessProfileGoals(uid, context(goal), page);
+    assert.equal(result.state, 'ready'); if (result.state !== 'ready') continue;
+    assert.equal(result.assessments[0].assessment.status, 'unknown');
+    assert.equal(result.assessments[0].assessment.rank, 0);
+    const card = rendered(goal);
+    assert.equal(card.querySelector('.fit-label')?.textContent, 'Add goal details');
+    assert.match(card.querySelector('.reason')?.textContent || '', /no criteria.*save them to your account/);
+    assert.deepEqual({goal, profile}, before, 'No inferred criteria or profile fields are persisted or synthesized.');
+  }
+});
+
+test('empty and punctuation-only term rows do not count as usable goal details', () => {
+  for (const terms of [[], ['---']]) {
+    const goal = makeGoal('career', [criterion('role', terms)]);
+    assert.equal(hasGoalCriteria(goal), false);
+    assert.equal(rendered(goal).querySelector('.fit-label')?.textContent, 'Add goal details');
+  }
+  assert.equal(hasGoalCriteria(makeGoal('career', [criterion('role', ['CEO'])])), true);
+});
+
+test('missing opportunity geography is explained without treating contact residence as a match', () => {
+  const goal = makeGoal('career', [criterion('location', ['London'], 'opportunity')]);
+  const card = rendered(goal);
+  assert.equal(card.querySelector('.fit-label')?.textContent, 'Not enough information');
+  assert.match(card.querySelector('.reason')?.textContent || '', /opportunity location is not established/);
+  assert.match(card.querySelector('.reason')?.textContent || '', /role or residence does not establish a job opening/);
+  const result = assessProfileGoals(uid, context(goal), page);
+  assert.equal(result.state, 'ready'); if (result.state === 'ready') assert.equal(result.assessments[0].assessment.isMatch, false);
+});
+
+test('headline aspirations stay unknown while a confirmed current role still supports a contact route', () => {
+  const goal = makeGoal('career', [criterion('role', ['CEO'], 'opportunity')]);
+  assert.match(rendered(goal).querySelector('.reason')?.textContent || '', /opportunity role is not established/);
+  const fit = compactFit(assessCandidate(goal, {name: 'Synthetic Person', position: 'CEO'}), goal);
+  assert.equal(fit.label, 'Possible fit');
+  assert.match(fit.reason, /recorded role overlaps.*not evidence of a vacancy/);
+});
+
+test('a preserved rendered current executive role remains a possible route even before goal criteria are filled', () => {
+  const goal = makeGoal('career'), entryText = 'CEO Example Company Jan 2024 – Present', dateRange = 'Jan 2024 – Present';
+  const current: Profile = {...profile, anchors: [...profile.anchors,
+    {kind: 'experience', text: entryText, sourceUrl: url + '#experience', observedAt: at},
+    {kind: 'timing', text: dateRange, sourceUrl: url + '#experience', observedAt: at},
+    {kind: 'experience', field: 'role', text: 'CEO', sourceUrl: url + '#experience', observedAt: at, currentExperience: {dateRange, entryText}},
+  ]};
+  const snapshot: PageSnapshot = {...page, profile: current};
+  const result = assessProfileGoals(uid, context(goal), snapshot);
+  assert.equal(result.state, 'ready'); if (result.state !== 'ready') return;
+  assert.equal(result.assessments[0].assessment.status, 'possible_route');
+  const card = rendered(goal, snapshot);
+  assert.equal(card.querySelector('.fit-label')?.textContent, 'Possible fit');
+  assert.match(card.querySelector('.reason')?.textContent || '', /recorded executive role.*hiring authority and openings remain unconfirmed/);
+  assert.match(card.querySelector('.reason')?.textContent || '', /Add goal criteria/);
+  assert.equal(goal.criteria.length, 0);
+});
+
+test('supported criteria, explicit required contradictions and unknown facts have different labels', () => {
+  const goal = makeGoal('career', [criterion('role', ['CEO']), criterion('custom', ['healthcare'])]);
+  const role = createEvidenceClaim({subject: 'candidate', field: 'role', text: 'CEO', sourceKind: 'manual', sourceLabel: 'Confirmed role', confidence: 'user_confirmed', appliesTo: 'contact'});
+  const contextClaim = createEvidenceClaim({subject: 'candidate', field: 'context', text: 'Healthcare experience', sourceKind: 'manual', sourceLabel: 'Confirmed experience', confidence: 'user_confirmed', appliesTo: 'contact'});
+  assert.equal(compactFit(assessCandidate(goal, {name: 'Synthetic Person', claims: [role, contextClaim]}), goal).label, 'Strong potential');
+  const low = compactFit(assessCandidate(goal, {name: 'Synthetic Person', claims: [{...role, polarity: 'negative'}, contextClaim]}), goal);
+  assert.equal(low.label, 'Low fit'); assert.match(low.reason, /explicit contact evidence contradicts/);
+  assert.equal(compactFit(assessCandidate(goal, {name: 'Synthetic Person'}), goal).label, 'Not enough information');
+});
+
+test('a newly saved criterion changes the result immediately without retrofitting the old version', () => {
+  const old = makeGoal('career'), revised = {...old, version: 2, criteria: [criterion('location', ['London'])]};
+  assert.equal(rendered(old).querySelector('.fit-label')?.textContent, 'Add goal details');
+  const next = rendered(revised);
+  assert.equal(next.querySelector('.fit-label')?.textContent, 'Possible fit');
+  assert.equal((next.querySelector('.goal-fit') as HTMLElement).dataset.goalVersion, '2');
+  assert.match(next.querySelector('.reason')?.textContent || '', /explicit contact evidence mentions London/);
+  assert.equal(old.criteria.length, 0);
+});
+
+test('an incomplete read and a too-large read give distinct recovery instructions', () => {
+  const goal = makeGoal('career', [criterion('role', ['CEO'])]);
+  const incomplete: PageSnapshot = {...page, state: 'unknown', profile: {...profile, anchors: profile.anchors.slice(0, 1), profileReadAt: null}};
+  assert.match(rendered(goal, incomplete).querySelector('.reason')?.textContent || '', /complete section read is not.*About or Experience/);
+  const large: PageSnapshot = {...page, state: 'unknown', profile: {...profile, truncated: true, profileReadAt: null}};
+  assert.match(rendered(goal, large).querySelector('.reason')?.textContent || '', /exceeds the save limit/);
+  assert.doesNotMatch(rendered(goal, large).textContent || '', /Add goal details/);
+});
+
+test('cross-account goal data remains refused before any comparison or detail prompt', () => {
+  const card = rendered(makeGoal('career'), page, '33333333-3333-4333-a333-333333333333');
+  assert.equal(card.querySelector('.goal-fit'), null);
+  assert.match(card.textContent || '', /could not be verified/);
+});

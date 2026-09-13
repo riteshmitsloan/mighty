@@ -1,18 +1,30 @@
 import type {CandidateAssessment} from '../../src/lib/assessment';
+import type {Goal} from '../../src/lib/goals';
 import {canonicalProfilePhotoUrl} from '../../src/lib/profile-photo';
 import type {AccountGoalContext} from './goal-context.js';
-import {assessProfileGoals} from './goal-assessment.js';
+import {assessProfileGoals, hasGoalCriteria} from './goal-assessment.js';
 import type {PageSnapshot, Profile} from './types.js';
 
 export function element<K extends keyof HTMLElementTagNameMap>(doc: Document, tag: K, text = '', className = '') {
   const node = doc.createElement(tag); node.textContent = text; node.className = className; return node;
 }
-export type CompactFit = {label: 'Strong potential' | 'Possible fit' | 'Low fit' | 'Not enough information'; tone: 'strong' | 'possible' | 'low' | 'unknown'; reason: string};
-export function compactFit(assessment: CandidateAssessment): CompactFit {
+export type CompactFit = {label: 'Strong potential' | 'Possible fit' | 'Low fit' | 'Not enough information' | 'Add goal details'; tone: 'strong' | 'possible' | 'low' | 'unknown'; reason: string};
+function missingGoalDetails(): CompactFit {
+  return {label: 'Add goal details', tone: 'unknown', reason: 'This saved goal has no criteria to compare. Add goal details in Mighty and save them to your account; a title alone does not define fit.'};
+}
+export function compactFit(assessment: CandidateAssessment, goal?: Goal): CompactFit {
+  if (goal ? !hasGoalCriteria(goal) : !assessment.criteria.length) {
+    const route = assessment.contactRoutes[0];
+    return route ? {label: 'Possible fit', tone: 'possible', reason: route.reason + ' Add goal criteria in Mighty to compare more than this contact route.'} : missingGoalDetails();
+  }
   const reason = assessment.reasons[0] || 'This profile does not yet establish relevance to this goal.';
   if (assessment.status === 'conflicting') return {label: 'Not enough information', tone: 'unknown', reason: 'The available facts conflict. Review this person in Mighty.'};
   if (assessment.status === 'contradicted') return {label: 'Low fit', tone: 'low', reason: assessment.criteria.find(row => row.status === 'contradicted' && row.importance === 'required' && row.origin === 'user')?.reason || reason};
-  if (assessment.status === 'unknown') return {label: 'Not enough information', tone: 'unknown', reason};
+  if (assessment.status === 'unknown') {
+    const missing = assessment.unknowns[0] || reason;
+    const opportunityGap = goal?.kind === 'career' && assessment.criteria.some(row => row.status === 'unknown' && row.appliesTo === 'opportunity');
+    return {label: 'Not enough information', tone: 'unknown', reason: missing + (opportunityGap ? ' A contact’s role or residence does not establish a job opening.' : '')};
+  }
   const userCriteria = assessment.criteria.filter(row => row.origin === 'user');
   const strong = assessment.status === 'supported' && userCriteria.length >= 2
     && userCriteria.every(row => row.status === 'supported')
@@ -61,7 +73,8 @@ export function compactProfile(doc: Document, options: CompactProfileOptions): H
     }
     section.append(pills);
     const assessment = result.state === 'ready' ? result.assessments.find(row => row.goal.id === selected.id)?.assessment : null;
-    const fit = assessment ? compactFit(assessment) : {label: 'Not enough information', tone: 'unknown', reason: 'The visible profile does not yet contain enough information for this goal.'};
+    const fit: CompactFit = assessment ? compactFit(assessment, selected) : !hasGoalCriteria(selected) ? missingGoalDetails()
+      : {label: 'Not enough information', tone: 'unknown', reason: result.state === 'unread' ? result.message : 'The saved goal could not be assessed. Try loading it again.'};
     const card = element(doc, 'div', '', 'goal-fit'); card.dataset.goalId = selected.id; card.dataset.goalVersion = String(selected.version);
     const label = element(doc, 'p', fit.label, 'fit-label'); label.dataset.fit = fit.tone;
     card.append(label, element(doc, 'p', concise(fit.reason), 'reason')); section.append(card);

@@ -1,5 +1,5 @@
 import{firstRendered,rendered,textOf}from'./dom.js';
-import{currentExperienceFields}from'./experience-fields.js';
+import{currentExperienceFields,sduiExperienceEntries}from'./experience-fields.js';
 import{canonicalProfileURL,isSearchURL}from'./urls.js';
 import{canonicalProfilePhotoUrl}from'../../src/lib/profile-photo';
 import type{Anchor,AnchorKind,PageSnapshot,PageState,Profile,SearchResult}from'./types.js';
@@ -149,13 +149,14 @@ export function readProfile(doc:Document,url:string,now=new Date().toISOString()
    }
    continue;
   }
-  const items=Array.from(section.querySelectorAll('li')).filter(x=>rendered(x)&&!x.parentElement?.closest('li'));
+  const sduiItems=kind==='experience'?sduiExperienceEntries(section,profileUrl):[];
+  const items=sduiItems.length?sduiItems:Array.from(section.querySelectorAll('li')).filter(x=>rendered(x)&&!x.parentElement?.closest('li'));
   for(const item of(items.length?items:[section])){
    const text=textOf(item,Infinity);if(!text||label.test(text))continue;
    const bodyOnly=text.replace(/^(?:about|experience|education|skills|languages|licenses? (?:&|and) certifications?|certifications?)\s*/i,'').replace(/(?:show all(?: \d+)?[^.]*|see more|show more|add (?:experience|education|skills))$/i,'').trim();if(!bodyOnly)continue;
    add(kind,text,id);
    if(kind==='experience'||kind==='education')for(const date of dateRanges(text)){add('timing',date,id);if(kind==='experience'&&recentRoleStart(date,now))add('timing','Recent role start indicated by “'+date+'”. The rendered start date or month falls within the last 90 days.',id);}
-   if(kind==='experience')for(const field of currentExperienceFields(item,now))add('experience',field.text,id,field);
+   if(kind==='experience')for(const field of currentExperienceFields(item,now,profileUrl))add('experience',field.text,id,field);
   }
  }
  const missingSections:AnchorKind[]=(['experience','education','location','skills','languages','certifications','activity'] as AnchorKind[]).filter(kind=>!anchors.some(anchor=>anchor.kind===kind));

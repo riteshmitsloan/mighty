@@ -26,7 +26,7 @@ if (supportedReadURL()) {
       else panel.readPage();
     } else {
       panel?.dispose(); panel = null;
-      // Search and own-profile reads remain manual in the toolbar popup.
+      // The parser remains available without mounting an automatic assessment.
       try {void chrome.runtime.sendMessage({type: 'mighty:page_changed'}).catch(() => {});} catch {}
     }
   }
