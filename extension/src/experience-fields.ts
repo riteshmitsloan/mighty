@@ -9,7 +9,7 @@ const entitySelector = 'div[componentkey^="entity-collection-item-"]';
 const experiencePrefix = 'Profile_Top_Level_ExperienceTopLevelSection';
 
 /** This observed SDUI collection belongs to the URL-bound subject, not a sidebar card. */
-function sduiExperienceCollection(section: Element, profileUrl: string): Element | null {
+function sduiExperienceScope(section: Element, profileUrl: string): Element | null {
   const canonical = canonicalProfileURL(profileUrl);
   if (!canonical || !section.matches('section') || !rendered(section)) return null;
   const slug = new URL(canonical).pathname.slice(4, -1), expected = new Set([experiencePrefix + slug, experiencePrefix + decodeURIComponent(slug)]);
@@ -17,13 +17,15 @@ function sduiExperienceCollection(section: Element, profileUrl: string): Element
     .filter(heading => heading.closest('section') === section && /^experience$/i.test(textOf(heading, Infinity)));
   const markers = visible(section, 'div[componentkey^="' + experiencePrefix + '"]');
   if (headings.length !== 1 || markers.length !== 1 || !expected.has(markers[0].getAttribute('componentkey') || '') || markers[0].closest('section') !== section) return null;
-  return markers[0];
+  // In SDUI the URL-bound marker can be an empty layout sibling of the heading
+  // and entries. It identifies this exact section; it need not contain the entries.
+  return section;
 }
 /** Keep each complete top-level entry, including grouped/historical entries, as raw evidence. */
 export function sduiExperienceEntries(section: Element, profileUrl: string): Element[] {
-  const collection = sduiExperienceCollection(section, profileUrl);
-  if (!collection) return [];
-  return visible(collection, entitySelector).filter(item => item.closest('section') === section
+  const scope = sduiExperienceScope(section, profileUrl);
+  if (!scope) return [];
+  return visible(scope, entitySelector).filter(item => item.closest('section') === section
     && !item.parentElement?.closest(entitySelector));
 }
 function companyURL(value: string): string | null {

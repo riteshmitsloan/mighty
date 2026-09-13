@@ -24,9 +24,40 @@ const fields = (role = 'Chief Technology Officer', employer = 'Example Systems �
 const entry = (paragraphs = fields(), extra = '<p>Description outside the company anchor. RAW_END</p>', href = company) =>
   `<div componentkey="entity-collection-item-synthetic"><a href="${href}"><figure><img alt="Example Systems logo"></figure></a><a href="${href}"><div>${paragraphs}</div></a>${extra}</div>`;
 const section = (entries = entry(), slug = 'synthetic-person') => `<section id="synthetic-experience"><h2 componentkey="ProfileNullStateCardAnchor_Experience">Experience</h2><div componentkey="Profile_Top_Level_ExperienceTopLevelSection${slug}">${entries}</div></section>`;
+// Observed SDUI hierarchy: an empty identity marker and the content wrapper are siblings.
+const siblingSection = (entries = entry(), slug = 'synthetic-person') => `<section id="synthetic-experience"><div>
+  <div data-display-contents="true"><div componentkey="Profile_Top_Level_ExperienceTopLevelSection${slug}"></div></div>
+  <div data-display-contents="true"><div><h2 componentkey="ProfileNullStateCardAnchor_Experience">Experience</h2></div><div>${entries}</div></div>
+</div></section>`;
 const page = (experience = section(), extra = '') => parseHTML(`<main><section aria-label="Primary content">${card}${about}${experience}</section>${extra}</main>`).document as Document;
 const read = (experience = section(), extra = '') => readProfile(page(experience, extra), url, at)!;
 const typed = (profile: Profile) => profile.anchors.filter(anchor => anchor.field !== undefined);
+
+test('an empty SDUI identity marker binds sibling current entries inside the exact same section', () => {
+  const document = page(siblingSection(entry(fields('Founding Partner (Region)', 'Example Ventures · Full-time', 'Jan 2024 - Present · 2 yrs 8 mos'))));
+  assert.equal(document.querySelector('[componentkey="Profile_Top_Level_ExperienceTopLevelSectionsynthetic-person"]')!.children.length, 0);
+  const profile = readProfile(document, url, at)!;
+  assert.deepEqual(typed(profile).map(anchor => [anchor.field, anchor.text]), [['role', 'Founding Partner (Region)'], ['company', 'Example Ventures']]);
+  for (const anchor of typed(profile)) assert.equal(validCurrentExperienceAnchor(anchor, profile.anchors, url, at), true);
+  const payload = inboxPayload(validateSave({operationId, userId: uid, profile, source: 'rendered_profile'}, session));
+  assert.deepEqual(payload.snapshot.anchors, profile.anchors);
+  assert.ok(profile.anchors.some(anchor => anchor.field === undefined && anchor.text.endsWith('RAW_END')));
+});
+
+test('an empty marker does not authorize entries from a different, nested or adjacent section', () => {
+  const nested = siblingSection('<section>' + entry() + '</section>');
+  const adjacent = siblingSection('') + '<section>' + entry() + '</section>';
+  const foreign = siblingSection(entry(), 'another-person');
+  const misplaced = siblingSection(entry()).replace('<div componentkey="Profile_Top_Level_ExperienceTopLevelSectionsynthetic-person"></div>', '')
+    + '<section><div componentkey="Profile_Top_Level_ExperienceTopLevelSectionsynthetic-person"></div></section>';
+  for (const html of [nested, adjacent, foreign, misplaced]) assert.equal(typed(read(html)).length, 0);
+});
+
+test('ambiguous empty markers or duplicate Experience headings refuse typed promotion', () => {
+  const duplicateMarker = siblingSection(entry()).replace('</div></section>', '<div componentkey="Profile_Top_Level_ExperienceTopLevelSectionsynthetic-person"></div></div></section>');
+  const duplicateHeading = siblingSection(entry()).replace('</div></section>', '<h2 componentkey="ProfileNullStateCardAnchor_Experience">Experience</h2></div></section>');
+  for (const html of [duplicateMarker, duplicateHeading]) assert.equal(typed(read(html)).length, 0);
+});
 
 test('the observed SDUI leaf entry yields the exact current role/company while retaining raw and timing evidence', () => {
   const profile = read();

@@ -10,6 +10,14 @@ Mighty supports intentional professional networking: choose a goal, inspect the 
 - Team: Ritesh Mohan Srivastava and Jayati Kambhampati.
 - This document records progress and a demo agenda. Updating it sends no submission or email.
 
+## Native extension follow-up: 0.3.2
+
+Native Chrome confirmed one connected top-right panel with the bundled font, profile photo and independent goal switching. A real Save reached the owner's Relationships list and survived reload; the photo, profile-read status and rendered profile context were visible in the main app. No LinkedIn invitation or message was sent.
+
+That test also caught an incorrect assumption in the first SDUI repair: the URL-bound Experience marker is an empty sibling of the entries. Version 0.3.2 searches for entries within that exact verified section and retains the cross-section rejection rules. Three new sibling-layout and boundary regressions cover the observed structure. 166 extension domain checks and 8 toolbar-render checks pass, alongside strict TypeScript and production packaging. All 19 files in the installed Documents/mighty-extension folder match ZIP SHA256 8756f8db1d631b6ca39a4f871ad8411fb9deb06a272951b964719afc6617717e.
+
+The native connection and Save evidence above is from 0.3.1. Native typed-current-role acceptance for the corrected 0.3.2 reader awaits Reload. Broader assessment usefulness, opportunity facts and fundraising stage remain unresolved; a possible contact route is not proof of hiring authority or investment intent.
+
 ## Extension repair: 0.3.1
 
 The toolbar popup now shows connection status only. A single compact assessment appears automatically at the top right of a verified other-person profile. Own profiles, feed, articles and search stay clear. The bundled font loads in the page panel with a sans-serif fallback.
