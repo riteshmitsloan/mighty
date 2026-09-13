@@ -5,6 +5,7 @@ import type {GatewayCall} from '../lib/platform';
 import type {EvidenceClaim} from '../lib/evidence';
 import {buildSavedPersonEvidence} from '../lib/person-evidence';
 import {assessCandidate} from '../lib/assessment';
+import {summarizeProfileActivity} from '../lib/profile-activity';
 import {companyOverlapFor, type CompanyOverlap} from '../lib/company-evidence';
 import {verifiedCompanyOverlap} from '../lib/discover';
 import {listRelationshipContext, saveCandidateObservation, normalizeCandidateObservation, observationsToClaims, type CandidateObservationInput, type MessageDraft} from '../lib/relationship-context';
@@ -69,6 +70,9 @@ function PersonEvidenceEditor({uid, person, goals, activeGoal, selfEvidence, com
     const evidence = candidateForGoal(goal.id);
     return {goal, evidence, result: assessCandidate(goal, evidence, selfEvidence)};
   }), [goals, baseCandidate, selfEvidence, observations, person.id]);
+  const sharedAssessment = assessments.find(row => row.goal.id === activeGoal?.id) ?? assessments[0];
+  const sharedContext = sharedAssessment?.result.sharedContext ?? [];
+  const activity = useMemo(() => summarizeProfileActivity(person.profile), [person.profile]);
   function begin(observation?: Observation) {
     if (lock.current || editing) return;
     requestId.current = crypto.randomUUID(); attempt.current = null; setRetryLocked(false);
@@ -102,6 +106,11 @@ function PersonEvidenceEditor({uid, person, goals, activeGoal, selfEvidence, com
     if (shouldReload) void reload();
   }
   return <div className="person-intelligence">
+    {sharedContext.length > 0 && <section className="panel content-panel"><p className="eyebrow">Common ground</p><h2>Something to talk about</h2><ul className="shared-context-list">{sharedContext.map(topic => <li key={topic.kind}><p>{topic.text}</p><details><summary>See the connection</summary>{topic.claimIds.map(id => {
+      const claim = [...(sharedAssessment?.evidence.claims ?? []),...selfEvidence].find(item => item.id === id);
+      return claim ? <blockquote key={id}>{claim.text}<cite>{claim.subject === 'self' ? 'About you' : 'About them'} · {claim.sourceLabel}</cite></blockquote> : null;
+    })}</details></li>)}</ul></section>}
+    {activity.state === 'observed' && <section className="panel content-panel"><p className="eyebrow">LinkedIn activity</p><h2>{activity.label}</h2><p>{activity.detail}</p>{activity.topics.length > 0 && <p>Topics visible: {activity.topics.map(topic => topic.text).join(' · ')}</p>}<details><summary>Activity details</summary>{activity.timestamps.map((stamp,index) => <p key={index}><a href={stamp.sourceUrl} target="_blank" rel="noreferrer">{stamp.text}</a> · shown in the activity section</p>)}{!activity.timestamps.length && <p>No usable timestamp was visible in this sample.</p>}<p className="small muted">Connection counts, follower totals and reply history are not part of this sample.</p></details></section>}
     <section className="panel content-panel"><div className="section-heading"><div><p className="eyebrow">Potential by goal</p><h2>A different reason for each conversation</h2></div></div>
       {!assessments.length ? <p>Add a goal in Me to explore their relevance.</p> : <div className="person-goal-assessments">{assessments.map(({goal, evidence, result}) => <article key={goal.id} className={goal.id === activeGoal?.id ? 'is-current' : ''}><h3>{goal.title}</h3><span className="pill neutral">{result.label}</span><p>{result.reasons[0] || 'The available records don’t establish a relevant route yet.'}</p><details><summary>Evidence and unknowns</summary>{result.criteria.map(criterion => <div key={criterion.criterionId}><p><strong>{criterion.status === 'supported' ? 'Supported' : criterion.status === 'unknown' ? 'Unknown' : criterion.status === 'contradicted' ? 'Contradicted' : 'Conflicting'} · </strong>{criterion.reason}</p>{criterion.claimIds.map(id => {const claim = evidence.claims.find(item => item.id === id); return claim ? <blockquote key={id}>{claim.text}<cite>{claim.sourceLabel}</cite></blockquote> : null;})}</div>)}{result.reasonDetails.filter(detail => !result.criteria.some(criterion => criterion.reason === detail.text)).map((detail, index) => <div key={index}><p>{detail.text}</p>{detail.claimIds.map(id => {
         const claim = [...evidence.claims, ...selfEvidence].find(item => item.id === id);

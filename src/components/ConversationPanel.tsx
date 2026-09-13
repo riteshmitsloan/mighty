@@ -2,6 +2,7 @@ import {useEffect, useId, useMemo, useRef, useState} from 'react';
 import {Check, Copy, Sparkles} from 'lucide-react';
 import type {Goal} from '../lib/goals';
 import {evidenceKey, type CandidateEvidence, type EvidenceClaim} from '../lib/evidence';
+import {assessCandidate} from '../lib/assessment';
 import type {GatewayCall} from '../lib/platform';
 import {CONVERSATION_LIMITS, eligibleConversationClaims, prepareConversation, type ConversationChannel, type ConversationDraft} from '../lib/conversation';
 import {recordGoalInteraction, saveMessageDraft, type GoalInteractionInput, type MessageDraft} from '../lib/relationship-context';
@@ -102,6 +103,9 @@ function ConversationEditor({uid,person,goal,candidate,selfEvidence,call,onRemai
   useEffect(()=>{mounted.current=true;onSnapshot(state.current);return()=>{mounted.current=false;generation.current++;};},[]);
   const candidateFacts=useMemo(()=>eligibleConversationClaims(candidate.claims,'candidate').filter(claim=>!claim.subjectKey || claim.subjectKey===candidate.key),[candidate]);
   const selfFacts=useMemo(()=>eligibleConversationClaims(selfEvidence,'self'),[selfEvidence]);
+  const sharedTopics=useMemo(()=>(assessCandidate(goal,candidate,selfEvidence).sharedContext??[]).map(topic=>({
+    ...topic,candidateIds:topic.claimIds.filter(id=>candidateFacts.some(claim=>claim.id===id)),selfIds:topic.claimIds.filter(id=>selfFacts.some(claim=>claim.id===id))
+  })).filter(topic=>topic.candidateIds.length>0&&topic.selfIds.length>0),[goal,candidate,selfEvidence,candidateFacts,selfFacts]);
   const missingIds=[...form.candidateIds.filter(claimId=>!candidateFacts.some(claim=>claim.id===claimId)),...form.selfIds.filter(claimId=>!selfFacts.some(claim=>claim.id===claimId))];
   const evidenceContext=useMemo(()=>evidenceKey([candidate.claims,selfEvidence]),[candidate.claims,selfEvidence]);
   const inputKey=evidenceKey({goal:[goal.id,goal.version,goal.kind,goal.title,goal.outcome],candidate:[candidate.key,candidate.name],evidenceContext,intent:form.intent,ask:form.ask,channel:form.channel,claims:[...candidateFacts.filter(claim=>form.candidateIds.includes(claim.id)),...selfFacts.filter(claim=>form.selfIds.includes(claim.id))]});
@@ -189,6 +193,12 @@ function ConversationEditor({uid,person,goal,candidate,selfEvidence,call,onRemai
       <fieldset disabled={disabled}>
         <div className="conversation-purpose-grid"><label>Why are you reaching out?<textarea rows={2} value={form.intent} maxLength={CONVERSATION_LIMITS.intentCharacters} placeholder="State your purpose in your own words." onChange={event=>change({intent:event.target.value})}/></label><label>Channel<select value={form.channel} onChange={event=>change({channel:event.target.value as ConversationChannel})}><option value="linkedin">LinkedIn message</option><option value="email">Email</option></select></label></div>
         <label>What would you like to ask?<textarea rows={2} value={form.ask} maxLength={CONVERSATION_LIMITS.askCharacters} placeholder="A clear question they can respond to." onChange={event=>change({ask:event.target.value})}/></label>
+        {sharedTopics.length > 0 && <div className="conversation-shared-topics"><p className="small muted">Start with common ground</p>{sharedTopics.map(topic=>{
+          const candidateIds=[...new Set([...form.candidateIds,...topic.candidateIds])],selfIds=[...new Set([...form.selfIds,...topic.selfIds])];
+          const selected=topic.candidateIds.every(id=>form.candidateIds.includes(id))&&topic.selfIds.every(id=>form.selfIds.includes(id));
+          const full=candidateIds.length>CONVERSATION_LIMITS.factsPerSubject||selfIds.length>CONVERSATION_LIMITS.factsPerSubject;
+          return <div key={topic.kind}><p>{topic.text}</p><button type="button" className="text-button" disabled={disabled||selected||full} title={full?'Unselect a fact below to make room for this topic.':undefined} onClick={()=>{change({candidateIds,selfIds});setNotice('Both source facts are selected. Your current draft is kept.');}}>{selected?'Topic selected':'Use this topic'}</button></div>;
+        })}</div>}
         <details className="conversation-facts"><summary>Add facts to this message <span className="muted">Optional · {form.candidateIds.length+form.selfIds.length} selected</span></summary><p className="muted small">Choose up to two facts about each person. Only these selected facts are used to prepare the message.</p><div className="conversation-evidence-grid">
           <FactPicker title={`About ${person.person}`} claims={candidateFacts} selected={form.candidateIds} disabled={disabled} onSelect={candidateIds=>change({candidateIds})}/>
           <FactPicker title="About you" claims={selfFacts} selected={form.selfIds} disabled={disabled} onSelect={selfIds=>change({selfIds})}/>

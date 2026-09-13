@@ -5,6 +5,7 @@ import {loadAccountGoals} from './goal-context.js';
 import {inboxPayload, isExternalSender, matchingPending, parseExternalMessage, pendingKey, sessionFromVerifiedToken, validSession, validateSave} from './messaging.js';
 import {canonicalProfileURL, isSearchURL} from './urls.js';
 import {startToolbar} from './toolbar.js';
+import {validateExtensionSelfContext} from '../../src/lib/extension-self-context';
 import type {PageSnapshot, PendingSave, SaveInput, Session} from './types.js';
 
 const setup = Promise.all([chrome.storage.local.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'}), chrome.storage.session.setAccessLevel({accessLevel:'TRUSTED_CONTEXTS'})]);
@@ -25,7 +26,7 @@ const refreshGoals = (previous: Session) => loadAccountGoals(previous, config).t
 function status(s: Session | null, includeGoals = false) {
   const current = validSession(s) ? s : null;
   return {connected:Boolean(current), userId:current?.userId || null, goalCount:current?.goalContext?.goals.length ?? 0,
-    ...(includeGoals ? {goalContext:current?.goalContext ?? null} : {}),
+    ...(includeGoals ? {goalContext:current?.goalContext ?? null, selfContext:current?.selfContext ?? null} : {}),
     message:accounts.message() || (current && !current.goalContext ? 'Your account is connected. Goals are unavailable; retry goals to load your saved account goals.' : ''),
     ...(accounts.code() ? {code:accounts.code()} : {}), configured:configured(), appOrigin:config.appOrigins[0]};
 }
@@ -104,7 +105,7 @@ function bindSaveToPage(save: SaveInput, scope: string) {
     throw new WorkerRequestError('This snapshot does not belong to the current LinkedIn page. Read the current page before saving.');
   }
 }
-async function verifiedHandoff(accessToken: string): Promise<Session> {
+async function verifiedHandoff(accessToken: string, profileContext?: unknown): Promise<Session> {
   if (!configured()) throw new AccountConnectionError('not_configured');
   let response: Response;
   try {response = await fetch(config.supabaseUrl + '/auth/v1/user', {headers:{apikey:config.publishableKey, Authorization:'Bearer ' + accessToken}, signal:AbortSignal.timeout(10000)});}
@@ -113,7 +114,11 @@ async function verifiedHandoff(accessToken: string): Promise<Session> {
   let user: unknown; try {user = await response.json();} catch {throw new AccountConnectionError('verification_unreadable');}
   if (!user || typeof user !== 'object' || Array.isArray(user) || !('id' in user) || typeof user.id !== 'string' || !(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(user.id))) throw new AccountConnectionError('verification_invalid');
   // Commit verification independently. A later goal failure cannot undo valid authentication.
-  return sessionFromVerifiedToken(accessToken, user.id, config.supabaseUrl);
+  const verified = sessionFromVerifiedToken(accessToken, user.id, config.supabaseUrl);
+  // A claimed owner is checked only after real account verification. Invalid or
+  // omitted context replaces any previous projection with no personal facts.
+  const selfContext = validateExtensionSelfContext(profileContext, verified.userId);
+  return {...verified, ...(selfContext ? {selfContext} : {})};
 }
 async function deliver(save: PendingSave, previous: Session) {
   const current = await session();
@@ -152,7 +157,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, respond) => {
     await setup; const parsed = parseExternalMessage(message);
     if (parsed.type === 'status') return {ok:true, ...status(await session())};
     if (parsed.type === 'disconnect') {await accounts.disconnect(); return {ok:true};}
-    const s = await accounts.connect(() => verifiedHandoff(parsed.accessToken), refreshGoals);
+    const s = await accounts.connect(() => verifiedHandoff(parsed.accessToken, parsed.selfContext), refreshGoals);
     if (s) void flush(s);
     return {ok:Boolean(s), ...status(s)};
   })().then(respond).catch(error => respond({ok:false, ...accountFailure(error)})); return true;

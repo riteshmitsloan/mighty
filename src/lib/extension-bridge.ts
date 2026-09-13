@@ -1,12 +1,13 @@
 /// <reference types="chrome" />
+import type {SelfEvidenceContext} from './extension-self-context';
 // App-side helper. Never inject this into LinkedIn or share a refresh token.
-export function connectExtension(extensionId:string,accessToken:string):Promise<unknown>{return chrome.runtime.sendMessage(extensionId,{type:'mighty:connect',protocol:1,accessToken});}
+export function connectExtension(extensionId:string,accessToken:string,selfContext:SelfEvidenceContext|null=null):Promise<unknown>{return chrome.runtime.sendMessage(extensionId,{type:'mighty:connect',protocol:1,accessToken,...(selfContext?{selfContext}:{})});}
 export function disconnectExtension(extensionId:string):Promise<unknown>{return chrome.runtime.sendMessage(extensionId,{type:'mighty:disconnect',protocol:1});}
-type BridgeOptions={extensionId:string;getAccessToken:()=>Promise<string|null>;onStatus?:(status:unknown)=>void};
+type BridgeOptions={extensionId:string;getAccessToken:()=>Promise<string|null>;getSelfContext?:()=>SelfEvidenceContext|null;onStatus?:(status:unknown)=>void};
 export function startExtensionBridge(options:BridgeOptions){
  let stopped=false,port:chrome.runtime.Port|undefined,timer:ReturnType<typeof setTimeout>|undefined,attempt=0,syncGeneration=0;
  async function sync(){const generation=++syncGeneration;try{const token=await options.getAccessToken();if(stopped||generation!==syncGeneration)return;
- const reply=token?await connectExtension(options.extensionId,token):await disconnectExtension(options.extensionId);if(!stopped&&generation===syncGeneration)options.onStatus?.(reply);
+ const reply=token?await connectExtension(options.extensionId,token,options.getSelfContext?.()??null):await disconnectExtension(options.extensionId);if(!stopped&&generation===syncGeneration)options.onStatus?.(reply);
  }catch{if(!stopped&&generation===syncGeneration)options.onStatus?.({ok:false,connected:false,message:'Extension connection is unavailable. Check that the unpacked extension is enabled.'});}}
  function open(){if(stopped)return;try{
  port=chrome.runtime.connect(options.extensionId,{name:'mighty:bridge'});

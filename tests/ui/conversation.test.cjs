@@ -185,3 +185,23 @@ test('saved list excludes other people and goals and is discarded across an acco
 test('oversized saved text stays readable and is refused without truncating or replacing the current editor',async()=>{
  const body='x'.repeat(2001);await render({savedDrafts:[savedDraft({channel:'linkedin',body})]});await click('Open saved draft');assert.match(text(),/longer than the editor allows/);assert.equal(document.querySelector('.conversation-saved .preserve-text').textContent,body);assert.equal(control('Why are you reaching out?').value,'');assert.equal(state.drafts.length,0);
 });
+
+test('shared topic selects both cited facts without preparing, sending or changing an existing draft',async()=>{
+ const candidate={...options.candidate,company:'Example Labs',claims:[...options.candidate.claims,claim('c-company','candidate','Example Labs',{field:'company'})]};
+ await render({candidate,selfEvidence:[...options.selfEvidence,claim('s-company','self','Example Labs',{field:'company'})]});
+ await fill();await submit();await edit('Message text','Keep this carefully written message');
+ assert.ok(button('Use this topic'));await click('Use this topic');
+ assert.equal([...document.querySelectorAll('input[type=checkbox]')].filter(e=>e.checked).length,2);
+ assert.ok(button('Topic selected').disabled);assert.equal(control('Message text').value,'Keep this carefully written message');
+ assert.equal(state.calls.length,0);assert.equal(state.events.length,0);assert.equal(state.drafts.length,0);
+ await submit();assert.match(control('Message text').value,/Example Labs/);
+ assert.match(text(),/About you/);assert.match(text(),/About them/);
+});
+test('shared topic cannot exceed the two-facts limit or use derived or foreign-person context',async()=>{
+ const candidate={...options.candidate,claims:[...options.candidate.claims,claim('c-skill','candidate','Machine Learning',{field:'skill'})]};
+ const selfEvidence=[...options.selfEvidence,claim('s-skill','self','Machine Learning',{field:'skill'})];
+ await render({candidate,selfEvidence});await toggle('Leads an applied');await toggle('Advises industry');
+ assert.ok(button('Use this topic').disabled);assert.equal([...document.querySelectorAll('input[type=checkbox]')].filter(e=>e.checked).length,2);
+ await render({selfEvidence:[claim('s-derived','self','Machine Learning',{field:'skill',sourceKind:'knowledge'})]});assert.equal(button('Use this topic'),undefined);
+ await render({selfEvidence,candidate:{...candidate,claims:[claim('foreign','candidate','Machine Learning',{field:'skill',subjectKey:'another-person'})]}});assert.equal(button('Use this topic'),undefined);
+});

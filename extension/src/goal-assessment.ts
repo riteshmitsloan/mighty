@@ -5,6 +5,7 @@ import {validCurrentExperienceAnchor} from '../../src/lib/current-experience';
 import {validateGoalContext, type AccountGoalContext} from './goal-context.js';
 import {canRequestBrief} from './scoring.js';
 import type {PageSnapshot, Profile} from './types.js';
+import {validateExtensionSelfContext, type SelfEvidenceContext} from '../../src/lib/extension-self-context';
 
 /** Titles and outcomes are user context, not implicit, confirmed scoring criteria. */
 export function hasGoalCriteria(goal: Goal): boolean {
@@ -33,7 +34,7 @@ export type ProfileGoalAssessment = {goal: Goal; assessment: CandidateAssessment
 export type GoalAssessmentResult = {state: 'ready'; candidate: CandidateEvidence; assessments: readonly ProfileGoalAssessment[]; contextKey: string}
   | {state: 'no_goals' | 'no_active_goals' | 'unread'; message: string};
 /** No result cache: each account/goal version/profile change receives a fresh shared-core assessment. */
-export function assessProfileGoals(userId: string, context: AccountGoalContext, snapshot: PageSnapshot | null): GoalAssessmentResult {
+export function assessProfileGoals(userId: string, context: AccountGoalContext, snapshot: PageSnapshot | null, selfContext?: SelfEvidenceContext | null): GoalAssessmentResult {
   const trusted = validateGoalContext(context, userId);
   if (!snapshot || snapshot.kind !== 'profile' || snapshot.state !== 'ready' || !canRequestBrief(snapshot.profile)) {
     return {state: 'unread', message: unreadReason(snapshot)};
@@ -42,6 +43,6 @@ export function assessProfileGoals(userId: string, context: AccountGoalContext, 
   const goals = trusted.goals.filter(goal => goal.status === 'active');
   if (!goals.length) return {state: 'no_active_goals', message: 'This account has no active saved goals. Activate and save a goal in Mighty.'};
   const candidate = renderedCandidate(snapshot.profile!);
-  // This bounded extension does not copy private self sources; shared-employer routes therefore remain unavailable.
-  return {state: 'ready', candidate, contextKey: trusted.key, assessments: goals.map(goal => ({goal, assessment: assessCandidate(goal, candidate, [])}))};
+  const self = validateExtensionSelfContext(selfContext, userId);
+  return {state: 'ready', candidate, contextKey: trusted.key + (self ? ':' + self.key : ''), assessments: goals.map(goal => ({goal, assessment: assessCandidate(goal, candidate, self?.claims ?? [])}))};
 }

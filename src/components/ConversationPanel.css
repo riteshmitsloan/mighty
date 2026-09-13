@@ -2,3 +2,4 @@
 .conversation-saved>article{padding:16px 0;border-bottom:1px solid var(--line)}
 .conversation-saved>article:last-of-type{margin-bottom:16px}
 .conversation-saved .preserve-text{white-space:pre-wrap;overflow-wrap:anywhere}
+.conversation-shared-topics{padding:14px 16px;background:#fbf8f5;border:1px solid #eee3d9;border-radius:14px;margin:16px 0}.conversation-shared-topics>div{display:flex;align-items:center;justify-content:space-between;gap:16px;font-size:13px}.conversation-shared-topics>div>p{margin:8px 0;flex:1}.conversation-shared-topics button{flex:none;min-height:36px}

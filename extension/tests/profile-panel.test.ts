@@ -39,7 +39,7 @@ test('compact panel mounts automatically with two goal pills, one result and no 
  const h=await harness();try{
   assert.ok(h.document.querySelector('#mighty-profile-panel'));assert.equal(h.panel.host.shadowRoot,null);
   assert.equal(h.all('.goal-pill').length,2);assert.equal(h.all('.goal-fit').length,1);assert.equal(h.find('.fit-label').textContent,'Possible fit');
-  h.all('.goal-pill')[1].click();assert.equal(h.find('.goal-pill[aria-pressed="true"]').textContent,'Fundraising');assert.equal(h.find('.fit-label').textContent,'Not enough information');
+  h.all('.goal-pill')[1].click();assert.equal(h.find('.goal-pill[aria-pressed="true"]').textContent,'Fundraising');assert.equal(h.find('.fit-label').textContent,'No clear connection yet');
   assert.equal(h.all('.evidence-section,.assessment-sources,.goal-unknowns').length,0);assert.doesNotMatch(h.find('.content').textContent||'',/END_SENTINEL|Why this matters|\d+%/);
   assert.equal(h.find('.skip').textContent,'Skip');assert.equal(h.find('.save').textContent,'Save to Mighty');
  }finally{h.panel.dispose();}
@@ -50,7 +50,7 @@ test('fit labels require explicit support and never turn missing facts into Low 
  const candidate={name:'Fixture',claims};const strong=goal(career.id,'Two supported facts',criteria);
  assert.equal(compactFit(assessCandidate(strong,candidate)).label,'Strong potential');
  assert.equal(compactFit(assessCandidate({...strong,criteria:[...criteria,criterion('Unknown stage','stage',['seed'])]},candidate)).label,'Possible fit');
- assert.equal(compactFit(assessCandidate(fundraising,candidate)).label,'Not enough information');
+ assert.equal(compactFit(assessCandidate(fundraising,candidate)).label,'No clear connection yet');
  const negative={...claims[0],id:'negative-role',polarity:'negative' as const};
  const low=compactFit(assessCandidate(strong,{name:'Fixture',claims:[negative,claims[1]]}));assert.equal(low.label,'Low fit');assert.match(low.reason,/contradicts/);
  const conflict=compactFit(assessCandidate(strong,{name:'Fixture',claims:[...claims,negative]}));assert.equal(conflict.label,'Not enough information');

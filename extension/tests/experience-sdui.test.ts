@@ -216,5 +216,5 @@ test('the observed current CTO role supports a career route but does not manufac
   assert.ok(job.assessment.contactRoutes.some(route => route.kind === 'peer'));
   assert.equal(job.assessment.criteria[0].status, 'unknown');
   assert.equal(funding.assessment.status, 'unknown');
-  assert.equal(compactFit(funding.assessment, funding.goal).label, 'Not enough information');
+  assert.equal(compactFit(funding.assessment, funding.goal).label, 'No clear connection yet');
 });

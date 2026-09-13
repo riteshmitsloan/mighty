@@ -7,6 +7,14 @@ const labelField = new Map<string, 'role' | 'company'>([['job title','role'],['r
 const visible = (root: Element, selector: string) => Array.from(root.querySelectorAll(selector)).filter(rendered);
 const entitySelector = 'div[componentkey^="entity-collection-item-"]';
 const experiencePrefix = 'Profile_Top_Level_ExperienceTopLevelSection';
+const duration = /^\d+\s+(?:yrs?|years?|mos?|months?|wks?|weeks?|days?)(?:\s+\d+\s+(?:yrs?|years?|mos?|months?|wks?|weeks?|days?)){0,2}$/i;
+
+function dateField(text: string): string | null {
+  const ranges = currentExperienceDateRanges(text);
+  if (ranges.length !== 1 || !text.startsWith(ranges[0])) return null;
+  const suffix = text.slice(ranges[0].length).trim();
+  return !suffix || /^[·•]\s*/.test(suffix) && duration.test(suffix.replace(/^[·•]\s*/, '')) ? ranges[0] : null;
+}
 
 /** This observed SDUI collection belongs to the URL-bound subject, not a sidebar card. */
 function sduiExperienceScope(section: Element, profileUrl: string): Element | null {
@@ -52,10 +60,55 @@ function unlinkedJobParagraphs(item: Element): {paragraphs: Element[]; logoLabel
     || (location && location.parentElement !== date.parentElement)) return null;
   return {paragraphs, logoLabel: (logos[0].getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim()};
 }
+/** Observed grouped layout: one linked employer header followed by direct, linked role children. */
+function groupedCurrentFields(item: Element, observedAt: string): CurrentExperienceField[] {
+  if (visible(item, entitySelector + ',[itemscope]').length) return [];
+  const lists = visible(item, 'ul'), groupText = textOf(item, Infinity);
+  if (lists.length !== 1 || lists[0].parentElement !== item || groupText.length > CURRENT_EXPERIENCE_LIMITS.entry) return [];
+  const list = lists[0], children = Array.from(list.children).filter(rendered);
+  if (children.length < 2 || children.some(child => !child.matches('li') || visible(child, 'li,ul,ol').length)
+    || visible(item, 'li').some(child => child.parentElement !== list)) return [];
+  const headerLinks = visible(item, 'a[href]').filter(link => !list.contains(link));
+  const textHeaders = headerLinks.filter(link => visible(link, 'p').length);
+  if (textHeaders.length !== 1) return [];
+  const header = textHeaders[0], employerUrl = companyURL(header.getAttribute('href') || ''), headerParagraphs = visible(header, 'p');
+  if (!employerUrl || headerParagraphs.length !== 2 || headerParagraphs.some(p => p.closest('a') !== header || visible(p, 'p').length)
+    || headerLinks.some(link => companyURL(link.getAttribute('href') || '') !== employerUrl)) return [];
+  const [company, tenure] = headerParagraphs.map(p => textOf(p, Infinity));
+  if (!company || company.length > CURRENT_EXPERIENCE_LIMITS.field || currentExperienceDateRanges(company).length || !duration.test(tenure)) return [];
+  const logoLabels = headerLinks.flatMap(link => visible(link, 'figure svg[role="img"][aria-label],figure img[alt]'))
+    .map(logo => (logo.getAttribute('aria-label') || logo.getAttribute('alt') || '').replace(/\s+/g, ' ').trim()).filter(Boolean);
+  if (logoLabels.some(label => label !== company + ' logo')) return [];
+  const outsideParagraphs = visible(item, 'p').filter(p => !list.contains(p));
+  if (outsideParagraphs.some(p => !header.contains(p))) return [];
+  const candidates: {role: string; dateRange: string; entryText: string}[] = [];
+  for (const child of children) {
+    const links = visible(child, 'a[href]'), textLinks = links.filter(link => visible(link, 'p').length);
+    if (textLinks.length !== 1 || links.some(link => companyURL(link.getAttribute('href') || '') !== employerUrl)) return [];
+    const link = textLinks[0], paragraphs = visible(link, 'p');
+    if (paragraphs.length < 2 || paragraphs.length > 3 || paragraphs.some(p => p.closest('a') !== link || visible(p, 'p').length)) return [];
+    const [role, date] = paragraphs.map(p => textOf(p, Infinity)), dateRange = dateField(date), entryText = textOf(child, Infinity);
+    if (!role || role.length > CURRENT_EXPERIENCE_LIMITS.field || currentExperienceDateRanges(role).length || !dateRange
+      || entryText.length > CURRENT_EXPERIENCE_LIMITS.entry) return [];
+    const ranges = [...new Set(currentExperienceDateRanges(entryText))];
+    if (ranges.length !== 1 || ranges[0] !== dateRange) return [];
+    if (/\b(?:Present|Current)$/i.test(dateRange)) {
+      if (!validCurrentExperienceDate(dateRange, observedAt)) return [];
+      candidates.push({role, dateRange, entryText});
+    }
+  }
+  // Neither first-item order nor the employer's total tenure chooses a current role.
+  if (candidates.length !== 1) return [];
+  const {role, dateRange, entryText} = candidates[0];
+  return (['role','company'] as const).map(field => ({field, text: field === 'role' ? role : company,
+    currentExperience: {dateRange, entryText, group: {company, entryText: groupText}}}));
+}
 /** Only an observed, dated employer layout establishes the semantics of these paragraphs. */
 function sduiCurrentFields(item: Element, observedAt: string, profileUrl: string): CurrentExperienceField[] {
   const section = item.closest('section');
-  if (!section || !sduiExperienceEntries(section, profileUrl).includes(item) || visible(item, entitySelector + ',li,[itemscope]').length) return [];
+  if (!section || !sduiExperienceEntries(section, profileUrl).includes(item)) return [];
+  if (visible(item, 'li').length) return groupedCurrentFields(item, observedAt);
+  if (visible(item, entitySelector + ',[itemscope]').length) return [];
   const entryText = textOf(item, Infinity);
   if (!entryText || entryText.length > CURRENT_EXPERIENCE_LIMITS.entry) return [];
   const ranges = [...new Set(currentExperienceDateRanges(entryText))];
@@ -75,9 +128,7 @@ function sduiCurrentFields(item: Element, observedAt: string, profileUrl: string
     if (paragraphs.length < 3 || paragraphs.length > 4 || paragraphs.some(p => p.closest('a') !== link || visible(p, 'p').length)) return [];
   }
   const [role, employer, renderedDate] = paragraphs.map(p => textOf(p, Infinity));
-  if (!renderedDate.startsWith(dateRange)) return [];
-  const suffix = renderedDate.slice(dateRange.length).trim();
-  if (suffix && !/^[·•]\s*\d+\s+(?:yrs?|years?|mos?|months?|wks?|weeks?|days?)(?:\s+\d+\s+(?:yrs?|years?|mos?|months?|wks?|weeks?|days?)){0,2}$/i.test(suffix)) return [];
+  if (dateField(renderedDate) !== dateRange) return [];
   // Employment type is a displayed suffix, never part of the employer's name.
   const employerParts = employer.split(/\s+[·•]\s+/);
   if (employerParts.length > 2 || (employerParts.length === 2 && !/^(?:Full-time|Part-time|Self-employed|Freelance|Contract|Internship|Apprenticeship|Seasonal|Co-op)$/i.test(employerParts[1]))) return [];

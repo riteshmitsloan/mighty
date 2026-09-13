@@ -165,7 +165,7 @@ async function moduleAssertions(db: PGlite, t: import('node:test').TestContext) 
    const fromApp=assessCandidate(goal,saved),fromExtension=assessCandidate(goal,renderedCandidate(profile));
    const verdict=(result:typeof fromApp)=>({status:result.status,isMatch:result.isMatch,criteria:result.criteria.map(c=>({id:c.criterionId,status:c.status})),routes:result.contactRoutes.map(r=>r.kind),reasons:result.reasons,unknowns:result.unknowns});
    assert.deepEqual(verdict(fromApp),verdict(fromExtension));
-   assert.deepEqual(fromApp.contactRoutes.map(r=>r.kind),['peer']);
+   assert.deepEqual(fromApp.contactRoutes.map(r=>r.kind),['peer','senior_contact']);
    assert.ok(fromApp.criteria.every(c=>c.status==='unknown'));
    // A first extension save is created after its read; there is no old company to retire.
    const firstUrl='https://www.linkedin.com/in/dated-first-save/';

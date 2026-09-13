@@ -1,4 +1,5 @@
 import type {AccountGoalContext} from './goal-context.js';
+import type {SelfEvidenceContext} from '../../src/lib/extension-self-context';
 import type {CurrentExperience} from '../../src/lib/current-experience';
 export const PROTOCOL=1;
 export type AnchorKind='headline'|'location'|'about'|'experience'|'education'|'skills'|'languages'|'certifications'|'activity'|'timing';
@@ -10,6 +11,6 @@ export type PageSnapshot={kind:'profile';state:PageState;profile:Profile|null;me
 export type GoalFit={reason:string;label:'Goal overlap'|'Possible goal overlap'|'No clear goal overlap'|'Not enough context';evidence:Anchor[]};
 /** appOrigins preserves the legacy config name; entries include an optional app base path. */
 export type PublicConfig={appOrigins:string[];supabaseUrl:string;publishableKey:string};
-export type Session={userId:string;accessToken:string;expiresAt:number;strategy:string;goalContext?:AccountGoalContext};
+export type Session={userId:string;accessToken:string;expiresAt:number;strategy:string;goalContext?:AccountGoalContext;selfContext?:SelfEvidenceContext};
 export type SaveInput={operationId:string;userId:string;profile:Profile;source:'rendered_profile'|'search_result'};
 export type PendingSave=SaveInput&{queuedAt:string};

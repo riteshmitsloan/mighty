@@ -5,6 +5,8 @@ import {fileURLToPath} from 'node:url';
 import {build} from 'esbuild';
 import {createRequire} from 'node:module';
 import {createProfilePanel} from '../src/profile-panel.js';
+import {buildExtensionSelfContext} from '../../src/lib/extension-self-context';
+import {createEvidenceClaim} from '../../src/lib/evidence';
 const {parseHTML}=createRequire(import.meta.url)('linkedom');
 const config = {appOrigins:['https://riteshmitsloan.github.io/mighty/','https://mighty.example'],supabaseUrl:'https://project.supabase.co',publishableKey:'sb_publishable_fixture'};
 const {outputFiles} = await build({entryPoints:[fileURLToPath(new URL('../src/worker.ts',import.meta.url))],bundle:true,write:false,platform:'browser',format:'iife',target:'chrome120',metafile:true,define:{__PUBLIC_CONFIG__:JSON.stringify(config)}});
@@ -46,6 +48,26 @@ test('worker verifies handoff, reads account goals with RLS bearer, and limits g
   const external=await h.send({type:'mighty:status',protocol:1},true);assert.equal(external.goalContext,undefined);assert.equal(external.goalCount,1);
   let refused:any;h.events.internal({type:'mighty:status'},{id:h.chrome.runtime.id,url:'https://www.linkedin.com/in/person/',tab:{id:4}},(value:any)=>{refused=value;});assert.equal(refused.ok,false);assert.equal(refused.code,'panel_frame_not_top');assert.equal(refused.goalContext,undefined);
   assert.deepEqual(h.access.sort(),['local:TRUSTED_CONTEXTS','session:TRUSTED_CONTEXTS']);
+});
+test('worker binds bounded self facts to verified identity and never returns them to the external app status',async()=>{
+  const h=runtime(),claim=createEvidenceClaim({subject:'self',field:'skill',text:'Machine learning',sourceKind:'profile',sourceLabel:'Profile',confidence:'observed',appliesTo:'contact'});
+  const selfContext=buildExtensionSelfContext(uid,[claim]);
+  const reply=await h.send({type:'mighty:connect',protocol:1,accessToken:token(),selfContext},true);
+  assert.equal(reply.ok,true);assert.equal(reply.selfContext,undefined);
+  const internal=await h.send({type:'mighty:status'});assert.equal(internal.selfContext.userId,uid);assert.equal(internal.selfContext.claims[0].text,'Machine learning');
+  assert.equal((await h.send({type:'mighty:status',protocol:1},true)).selfContext,undefined);
+  assert.ok(h.calls.every(call=>call.body===null));
+  h.state.authOwner=other;h.state.goalRows=[{id:goal.id,user_id:other,version:1,document:goal}];
+  await h.send({type:'mighty:connect',protocol:1,accessToken:token(other),selfContext},true);
+  const replacement=await h.send({type:'mighty:status'});assert.equal(replacement.connected,true);assert.equal(replacement.userId,other);assert.equal(replacement.selfContext,null);
+});
+test('old-app or malformed context renewal clears facts while retaining the newly verified account',async()=>{
+  const h=runtime(),claim=createEvidenceClaim({subject:'self',field:'company',text:'Example',sourceKind:'profile',sourceLabel:'Profile',confidence:'observed',appliesTo:'contact'}),selfContext=buildExtensionSelfContext(uid,[claim]);
+  for(const replacement of [undefined,{...selfContext,rawResume:'PRIVATE_SENTINEL'}]){
+    await h.send({type:'mighty:connect',protocol:1,accessToken:token(),selfContext},true);
+    await h.send({type:'mighty:connect',protocol:1,accessToken:token(),...(replacement?{selfContext:replacement}:{})},true);
+    const status=await h.send({type:'mighty:status'});assert.equal(status.connected,true);assert.equal(status.selfContext,null);assert.doesNotMatch(JSON.stringify(h.session),/PRIVATE_SENTINEL/);
+  }
 });
 test('verified replacement with foreign goal rows keeps only its new identity and no old goals',async()=>{
   const h=runtime();await h.connect();h.state.authOwner=other;

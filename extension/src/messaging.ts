@@ -12,10 +12,10 @@ export function isExternalSender(sender:{url?:string;origin?:string;id?:string},
   return (!sender.origin||sender.origin===url.origin)&&allowedOrigins.some(app=>exactAppURL(sender.url!,app));
  }catch{return false;}
 }
-export function parseExternalMessage(input:unknown):{type:'connect';accessToken:string}|{type:'disconnect'}|{type:'status'}{
+export function parseExternalMessage(input:unknown):{type:'connect';accessToken:string;selfContext?:unknown}|{type:'disconnect'}|{type:'status'}{
  if(!input||typeof input!=='object'||Array.isArray(input))throw Error('Invalid bridge message.');
  const v=input as Record<string,unknown>;if(v.protocol!==1)throw Error('Unsupported bridge protocol.');
- if(v.type==='mighty:connect'){if(Object.keys(v).some(x=>!['protocol','type','accessToken'].includes(x))||typeof v.accessToken!=='string'||v.accessToken.length>8192)throw Error('Invalid account handoff.');return{type:'connect',accessToken:v.accessToken};}
+ if(v.type==='mighty:connect'){if(Object.keys(v).some(x=>!['protocol','type','accessToken','selfContext'].includes(x))||typeof v.accessToken!=='string'||v.accessToken.length>8192)throw Error('Invalid account handoff.');return{type:'connect',accessToken:v.accessToken,...(v.selfContext===undefined?{}:{selfContext:v.selfContext})};}
  if(['mighty:disconnect','mighty:status'].includes(String(v.type))&&Object.keys(v).every(x=>['protocol','type'].includes(x)))return{type:v.type==='mighty:disconnect'?'disconnect':'status'};
  throw Error('Unsupported bridge message.');
 }

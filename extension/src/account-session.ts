@@ -1,6 +1,7 @@
 import {validateGoalContext} from './goal-context.js';
 import {AccountConnectionError, accountFailure, isAuthenticationFailure} from './account-errors.js';
 import {validSession} from './messaging.js';
+import {validateExtensionSelfContext} from '../../src/lib/extension-self-context';
 import type {Session} from './types.js';
 export interface AccountSessionStorage {read(): Promise<Session | null>; write(value: Session | null): Promise<void>}
 /** Serializes identity replacement and goal refresh without retaining another account's context. */
@@ -15,7 +16,8 @@ export function createAccountSession(storage: AccountSessionStorage, changed: ()
   const identity = (value: Session | null): Session => {
     if (!validSession(value, now())) throw new AccountConnectionError('session_expired');
     if (typeof value.userId !== 'string' || typeof value.accessToken !== 'string' || !value.accessToken) throw new AccountConnectionError('session_invalid');
-    return {userId: value.userId, accessToken: value.accessToken, expiresAt: value.expiresAt, strategy: ''};
+    const selfContext = validateExtensionSelfContext(value.selfContext, value.userId, now());
+    return {userId: value.userId, accessToken: value.accessToken, expiresAt: value.expiresAt, strategy: '', ...(selfContext ? {selfContext} : {})};
   };
   async function current(): Promise<Session | null> {
     const ticket = generation, pendingWrites = writes;
@@ -27,8 +29,13 @@ export function createAccountSession(storage: AccountSessionStorage, changed: ()
     let owner: Session;
     try {owner = identity(value);}
     catch (error) {diagnostic(error); await write(ticket, null); changed(); return null;}
-    if (value.goalContext === undefined) return owner;
-    try {return {...owner, goalContext: validateGoalContext(value.goalContext, owner.userId)};}
+    const expiredSelf = value.selfContext !== undefined && owner.selfContext === undefined;
+    if (value.goalContext === undefined) {if (expiredSelf) {await write(ticket, owner); changed();} return ticket === generation ? owner : current();}
+    try {
+      const next = {...owner, goalContext: validateGoalContext(value.goalContext, owner.userId)};
+      if (expiredSelf) {await write(ticket, next); changed();}
+      return ticket === generation ? next : current();
+    }
     catch (error) {
       // A malformed goal cache is not evidence that a previously verified bearer expired.
       diagnostic(error); await write(ticket, owner); changed();
@@ -56,7 +63,7 @@ export function createAccountSession(storage: AccountSessionStorage, changed: ()
       if (ticket !== generation) return current();
       const expired = !validSession(owner, now());
       diagnostic(expired ? new AccountConnectionError('session_expired') : error);
-      const next = expired || isAuthenticationFailure(error) ? null : owner;
+      const next = expired || isAuthenticationFailure(error) ? null : identity(owner);
       await write(ticket, next);
       if (ticket !== generation) return current();
       changed(); return next;

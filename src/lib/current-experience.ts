@@ -1,5 +1,8 @@
 /** Raw visible provenance, not a declaration that every current role was captured. */
-export type CurrentExperience = Readonly<{dateRange: string; entryText: string}>;
+export type CurrentExperience = Readonly<{dateRange: string; entryText: string;
+  /** A grouped employer is separate from the exact, independently dated child role. */
+  group?: Readonly<{company: string; entryText: string}>;
+}>;
 export const CURRENT_EXPERIENCE_LIMITS = Object.freeze({field: 200, range: 80, entry: 8_000});
 const months = ['jan','feb','mar','apr','may','jun','jul','aug','sep','oct','nov','dec'];
 const month = '(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)';
@@ -37,11 +40,21 @@ export function validCurrentExperienceAnchor(anchor: unknown, anchors: readonly 
   if (!profileReadAt || !Number.isFinite(Date.parse(profileReadAt)) || value.observedAt !== profileReadAt || value.sourceUrl !== profileUrl+'#experience') return false;
   if (value.appliesTo !== undefined && value.appliesTo !== 'contact' || value.polarity !== undefined && value.polarity !== 'positive') return false;
   const current = record(value.currentExperience);
-  if (!current || Object.keys(current).some(key => !['dateRange','entryText'].includes(key)) || typeof current.dateRange !== 'string' || typeof current.entryText !== 'string') return false;
-  if (!current.entryText.trim() || current.entryText.length > CURRENT_EXPERIENCE_LIMITS.entry || !validCurrentExperienceDate(current.dateRange, profileReadAt) || !current.entryText.includes(value.text) || !current.entryText.includes(current.dateRange)) return false;
+  if (!current || Object.keys(current).some(key => !['dateRange','entryText','group'].includes(key)) || typeof current.dateRange !== 'string' || typeof current.entryText !== 'string') return false;
+  if (!current.entryText.trim() || current.entryText.length > CURRENT_EXPERIENCE_LIMITS.entry || !validCurrentExperienceDate(current.dateRange, profileReadAt) || !current.entryText.includes(current.dateRange)) return false;
   const ranges = [...new Set(currentExperienceDateRanges(current.entryText))];
   if (ranges.length !== 1 || ranges[0] !== current.dateRange) return false;
   const sameSource = (other: Record<string,unknown> | null) => other && other.sourceUrl === value.sourceUrl && other.observedAt === profileReadAt && other.field === undefined && other.currentExperience === undefined;
+  if (current.group !== undefined) {
+    const group = record(current.group);
+    if (!group || Object.keys(group).some(key => !['company','entryText'].includes(key)) || typeof group.company !== 'string'
+      || !group.company.trim() || group.company !== group.company.trim() || group.company.length > CURRENT_EXPERIENCE_LIMITS.field
+      || currentExperienceDateRanges(group.company).length || typeof group.entryText !== 'string'
+      || group.entryText.length > CURRENT_EXPERIENCE_LIMITS.entry || group.entryText === current.entryText
+      || !group.entryText.includes(group.company) || !group.entryText.includes(current.entryText)) return false;
+    if (value.field === 'company' ? value.text !== group.company : !current.entryText.includes(value.text)) return false;
+    if (!anchors.some(other => {const raw = record(other); return sameSource(raw) && raw!.kind === 'experience' && raw!.text === group.entryText;})) return false;
+  } else if (!current.entryText.includes(value.text)) return false;
   return anchors.some(other => {const raw=record(other); return sameSource(raw) && raw!.kind==='experience' && raw!.text===current.entryText;})
     && anchors.some(other => {const timing=record(other); return sameSource(timing) && timing!.kind==='timing' && timing!.text===current.dateRange;});
 }

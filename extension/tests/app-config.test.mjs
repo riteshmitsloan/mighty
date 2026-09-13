@@ -9,7 +9,7 @@ test('default build preserves hosted base path and source manifest uses the same
  assert.deepEqual(patterns,['https://riteshmitsloan.github.io/mighty/*','http://127.0.0.1/*','http://localhost/*']);
  const manifest=JSON.parse(await readFile(new URL('../manifest.json',import.meta.url),'utf8'));
  assert.deepEqual(manifest.externally_connectable.matches,patterns);
- assert.equal(manifest.version,'0.3.6');
+ assert.equal(manifest.version,'0.3.7');
  assert.ok(manifest.host_permissions.every(value=>value.includes('linkedin.com/')));
 });
 test('build config retains deployment paths, deduplicates base URLs and refuses malformed or broader hosted scopes',()=>{

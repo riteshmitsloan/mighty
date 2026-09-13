@@ -10,6 +10,18 @@ Mighty supports intentional professional networking: choose a goal, inspect the 
 - Team: Ritesh Mohan Srivastava and Jayati Kambhampati.
 - This document records progress and a demo agenda. Updating it sends no submission or email.
 
+## Contact relevance, common ground and activity: 0.3.7
+
+The owner confirmed 0.3.6 works across profiles. The remaining assessment gap involved contact-versus-opportunity logic and grouped Experience parsing. Version 0.3.7 adds conservative senior, recruiter, hiring-headline and investor routes. Explicit current child jobs retain both child and employer-group provenance. A headline supplies only a provisional route, not a current-role claim or Strong potential by itself.
+
+With the owner's authorization, both goals were saved through the signed-in hosted editor. Existing targets were preserved. Career now includes preferred hiring, recruiting and senior-leader contacts; funding includes investor, angel and VC contacts. Each account save was confirmed. No model call or outreach was needed.
+
+Shared employer, education, skill and work-history topics retain citations from both people. At most 40 factual self claims are tied to the verified extension account with a 15-minute lease. The panel shows one talking point. The app displays source facts and allows explicit selection for a draft without replacing text. Account/source races and draft preservation are covered by regressions.
+
+Activity summarizes only visible preserved items, literal hashtags and dated section-level timestamps. It does not establish posting cadence, authored-post counts, follower totals or reply probability. Missing data is not inactivity. Cross-account responsiveness remains a future opt-in proposal.
+
+Validation: 477 release core, 146 UI and 219 extension checks passed, plus both TypeScript checks and production packaging. The 24 unrelated uncommitted research tests are excluded. The real compact renderer was visually inspected in Chrome using fictional profile data. All 19 files in the existing installed folder match extension ZIP SHA256 75ac4e456cd1926d9c86de0901e84a4b832ff6f8e212c65e3693adfbb5a44578. Native installed 0.3.7 acceptance remains pending Reload; earlier native Save/navigation evidence is not a new claim for this release.
+
 ## Extension reload repair: 0.3.6
 
 The reported native Chrome error was `Extension context invalidated` at the panel's font URL lookup. An old content script could keep running after an extension reload and throw before the font loader's own error handling. Version 0.3.6 guards that lookup and stops the invalidated controller's observers, route polling, timers and pending UI updates. Teardown tolerates invalid runtime access, removes only its own panel, and ignores callbacks from replaced connection ports.

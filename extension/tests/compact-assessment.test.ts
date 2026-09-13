@@ -39,7 +39,7 @@ test('title-only career and fundraising goals request details instead of blaming
     assert.equal(result.assessments[0].assessment.rank, 0);
     const card = rendered(goal);
     assert.equal(card.querySelector('.fit-label')?.textContent, 'Add goal details');
-    assert.match(card.querySelector('.reason')?.textContent || '', /no criteria.*save them to your account/);
+    assert.match(card.querySelector('.reason')?.textContent || '', /who you want to meet.*save your goal/);
     assert.deepEqual({goal, profile}, before, 'No inferred criteria or profile fields are persisted or synthesized.');
   }
 });
@@ -53,22 +53,22 @@ test('empty and punctuation-only term rows do not count as usable goal details',
   assert.equal(hasGoalCriteria(makeGoal('career', [criterion('role', ['CEO'])])), true);
 });
 
-test('missing opportunity geography is explained without treating contact residence as a match', () => {
+test('missing opportunity geography does not turn a conversation assessment into a vacancy check', () => {
   const goal = makeGoal('career', [criterion('location', ['London'], 'opportunity')]);
   const card = rendered(goal);
-  assert.equal(card.querySelector('.fit-label')?.textContent, 'Not enough information');
-  assert.match(card.querySelector('.reason')?.textContent || '', /opportunity location is not established/);
-  assert.match(card.querySelector('.reason')?.textContent || '', /role or residence does not establish a job opening/);
+  assert.equal(card.querySelector('.fit-label')?.textContent, 'No clear connection yet');
+  assert.match(card.querySelector('.reason')?.textContent || '', /hiring, leadership or peer connection/);
+  assert.doesNotMatch(card.querySelector('.reason')?.textContent || '', /job opening|opportunity location/);
   const result = assessProfileGoals(uid, context(goal), page);
-  assert.equal(result.state, 'ready'); if (result.state === 'ready') assert.equal(result.assessments[0].assessment.isMatch, false);
+  assert.equal(result.state, 'ready'); if (result.state === 'ready') {assert.equal(result.assessments[0].assessment.isMatch, false); assert.match(result.assessments[0].assessment.unknowns.join(' '), /opportunity location is not established/);}
 });
 
 test('headline aspirations stay unknown while a confirmed current role still supports a contact route', () => {
   const goal = makeGoal('career', [criterion('role', ['CEO'], 'opportunity')]);
-  assert.match(rendered(goal).querySelector('.reason')?.textContent || '', /opportunity role is not established/);
+  assert.equal(rendered(goal).querySelector('.fit-label')?.textContent, 'No clear connection yet');
   const fit = compactFit(assessCandidate(goal, {name: 'Synthetic Person', position: 'CEO'}), goal);
   assert.equal(fit.label, 'Possible fit');
-  assert.match(fit.reason, /recorded role overlaps.*not evidence of a vacancy/);
+  assert.match(fit.reason, /experience in your target role.*may offer advice/);
 });
 
 test('a preserved rendered current executive role remains a possible route even before goal criteria are filled', () => {
@@ -84,8 +84,8 @@ test('a preserved rendered current executive role remains a possible route even 
   assert.equal(result.assessments[0].assessment.status, 'possible_route');
   const card = rendered(goal, snapshot);
   assert.equal(card.querySelector('.fit-label')?.textContent, 'Possible fit');
-  assert.match(card.querySelector('.reason')?.textContent || '', /recorded executive role.*hiring authority and openings remain unconfirmed/);
-  assert.match(card.querySelector('.reason')?.textContent || '', /Add goal criteria/);
+  assert.match(card.querySelector('.reason')?.textContent || '', /senior leadership role.*may offer a useful introduction/);
+  assert.doesNotMatch(card.querySelector('.reason')?.textContent || '', /Add goal criteria/);
   assert.equal(goal.criteria.length, 0);
 });
 
@@ -96,7 +96,7 @@ test('supported criteria, explicit required contradictions and unknown facts hav
   assert.equal(compactFit(assessCandidate(goal, {name: 'Synthetic Person', claims: [role, contextClaim]}), goal).label, 'Strong potential');
   const low = compactFit(assessCandidate(goal, {name: 'Synthetic Person', claims: [{...role, polarity: 'negative'}, contextClaim]}), goal);
   assert.equal(low.label, 'Low fit'); assert.match(low.reason, /explicit contact evidence contradicts/);
-  assert.equal(compactFit(assessCandidate(goal, {name: 'Synthetic Person'}), goal).label, 'Not enough information');
+  assert.equal(compactFit(assessCandidate(goal, {name: 'Synthetic Person'}), goal).label, 'No clear connection yet');
 });
 
 test('a newly saved criterion changes the result immediately without retrofitting the old version', () => {

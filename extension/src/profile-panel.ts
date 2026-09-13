@@ -4,10 +4,11 @@ import {snapshot} from './profile.js';
 import {canonicalProfileURL} from './urls.js';
 import {loadPanelFont, PANEL_FONT_FAMILY} from './panel-font.js';
 import type {AccountGoalContext} from './goal-context.js';
+import type {SelfEvidenceContext} from '../../src/lib/extension-self-context';
 import type {PageSnapshot, Profile, SaveInput} from './types.js';
 
 type PanelRuntime = Pick<typeof chrome.runtime, 'id' | 'getURL' | 'sendMessage' | 'connect' | 'lastError'>;
-type Account = {connected: boolean; userId: string | null; goalContext: AccountGoalContext | null; appOrigin: string; message?: string};
+type Account = {connected: boolean; userId: string | null; goalContext: AccountGoalContext | null; selfContext?: SelfEvidenceContext | null; appOrigin: string; message?: string};
 export interface ProfilePanelOptions {
   document: Document; runtime: PanelRuntime; url: () => string;
   read?: (document: Document, url: string) => PageSnapshot;
@@ -95,7 +96,7 @@ export function createProfilePanel(options: ProfilePanelOptions) {
     const link = appLink(account.connected ? 'Open Mighty' : 'Connect to Mighty'); if (link) status.append(link);
     surface.append(status);
     const main = el('div', '', 'content'); main.setAttribute('aria-busy', String(!page));
-    main.append(compactProfile(doc, {page, connected: account.connected, userId: account.userId, goalContext: account.goalContext, selectedGoalId,
+    main.append(compactProfile(doc, {page, connected: account.connected, userId: account.userId, goalContext: account.goalContext, selfContext: account.selfContext, selectedGoalId,
       onSelect: id => {selectedGoalId = id; render(); (surface.querySelector('.goal-pill[aria-pressed="true"]') as HTMLButtonElement)?.focus();}}));
     if (!page) main.append(el('p', 'Reading this profile…', 'hint'));
     if (page && page.state === 'blocked') main.append(el('p', 'LinkedIn is limiting this page. Check for a verification request.', 'hint'));
@@ -131,10 +132,10 @@ export function createProfilePanel(options: ProfilePanelOptions) {
       if (disposed || ticket !== accountGeneration) return;
       connectionDiagnostic = '';
       if (account.userId !== result.userId) {accountEpoch++; selectedGoalId = null; operations.clear(); savedKeys.clear();}
-      account = {connected: result.connected === true, userId: result.userId || null, goalContext: result.connected ? result.goalContext || null : null, appOrigin: result.appOrigin, message: result.message};
+      account = {connected: result.connected === true, userId: result.userId || null, goalContext: result.connected ? result.goalContext || null : null, selfContext: result.connected ? result.selfContext || null : null, appOrigin: result.appOrigin, message: result.message};
     } catch (error) {
       if (disposed || ticket !== accountGeneration) return;
-      accountEpoch++; account = {...account, connected: false, userId: null, goalContext: null, message: error instanceof Error ? error.message : 'Reconnect from Mighty.'}; selectedGoalId = null;
+      accountEpoch++; account = {...account, connected: false, userId: null, goalContext: null, selfContext: null, message: error instanceof Error ? error.message : 'Reconnect from Mighty.'}; selectedGoalId = null;
     } finally {if (!disposed && ticket === accountGeneration) {checking = false; render();}}
   }
   function open() {
@@ -195,19 +196,19 @@ export function createProfilePanel(options: ProfilePanelOptions) {
           render(); return;
         }
         if (message?.type !== 'mighty:account_changed') return;
-        accountGeneration++; accountEpoch++; account = {...account, connected: false, goalContext: null}; selectedGoalId = null;
+        accountGeneration++; accountEpoch++; account = {...account, connected: false, goalContext: null, selfContext: null}; selectedGoalId = null;
         render(); void refreshAccount();
       });
       current.onDisconnect.addListener(() => {
         try {void runtime.lastError;} catch { /* Invalidated runtime getters can throw too. */ }
         if (disposed || port !== current) return;
         port = undefined; if (!runtimeReady() || !supportedPanelURL(options.url())) return;
-        accountGeneration++; accountEpoch++; account = {...account, connected: false, userId: null, goalContext: null}; render();
+        accountGeneration++; accountEpoch++; account = {...account, connected: false, userId: null, goalContext: null, selfContext: null}; render();
         clearTimeout(reconnect);
         if (++reconnectAttempts > 8) {connectionDiagnostic ||= account.message || 'Mighty could not reconnect. Refresh this page to try again.'; render(); return;}
         reconnect = setTimeout(() => {connect(); void refreshAccount(true);}, Math.min(1000, reconnectAttempts * 100));
       });
-    } catch (error) {if (failedRuntime(error)) return; account = {...account, connected: false, goalContext: null}; connectionDiagnostic = 'Mighty was reloaded. Refresh this page to reconnect.'; render();}
+    } catch (error) {if (failedRuntime(error)) return; account = {...account, connected: false, goalContext: null, selfContext: null}; connectionDiagnostic = 'Mighty was reloaded. Refresh this page to reconnect.'; render();}
   }
   if (fontURL) readPage(); else invalidateRuntime();
   return {host, shadow, readPage, refreshAccount, open, dispose};

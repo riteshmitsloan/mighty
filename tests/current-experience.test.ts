@@ -31,3 +31,35 @@ test('provenance limits reject excess while callers retain the original source',
   assert.equal(valid({...role,currentExperience:{...role.currentExperience,entryText:'C'.repeat(8001)}}),false);
   assert.equal(raw.text,'Role CEO Company Example Jan 2023 – Present');
 });
+
+test('a grouped employer requires exact parent and child source companions without rewriting child text',()=>{
+  const child={...raw,text:'Chief Technology Officer Jan 2023 – Present Leads infrastructure.'};
+  const parent={...raw,text:'Example Systems Full-time '+child.text+' Engineering Director Jan 2020 – Dec 2022'};
+  const currentExperience={dateRange:timing.text,entryText:child.text,group:{company:'Example Systems',entryText:parent.text}};
+  const role={...raw,field:'role',text:'Chief Technology Officer',currentExperience};
+  const company={...role,field:'company',text:'Example Systems'};
+  const anchors=[parent,child,timing,role,company];
+  assert.equal(valid(role,anchors),true);assert.equal(valid(company,anchors),true);
+  assert.ok(!child.text.includes(company.text),'The employer is actually in the parent, not fabricated into child text.');
+  assert.equal(valid(role,anchors.filter(anchor=>anchor!==parent)),false);
+  assert.equal(valid(company,anchors.filter(anchor=>anchor!==child)),false);
+  assert.equal(valid(role,anchors.filter(anchor=>anchor!==timing)),false);
+  for(const change of [{sourceUrl:url+'#about'},{observedAt:'2025-01-01T00:00:00Z'},{field:'company'}])
+    assert.equal(valid(company,[{...parent,...change},child,timing,role,company]),false);
+  assert.equal(valid({...role,text:'Engineering Director'},anchors),false,'A historical sibling cannot supply the current role.');
+  assert.equal(valid({...company,text:'Another Employer'},anchors),false);
+});
+
+test('group metadata cannot relax the exact child date or permit malformed and excessive provenance',()=>{
+  const child={...raw,text:'CEO Jan 2023 – Present'},parent={...raw,text:'Example Systems CEO Jan 2023 – Present Director 2019 – 2022'};
+  const currentExperience={dateRange:timing.text,entryText:child.text,group:{company:'Example Systems',entryText:parent.text}};
+  const role={...raw,field:'role',text:'CEO',currentExperience},anchors=[parent,child,timing,role];
+  for(const group of [null,[],{}, {...currentExperience.group,extra:true},{...currentExperience.group,company:' Example Systems'},
+    {...currentExperience.group,company:'X'.repeat(201)},{...currentExperience.group,entryText:'X'.repeat(8001)},
+    {...currentExperience.group,entryText:child.text},{...currentExperience.group,entryText:'Example Systems Other person Jan 2023 – Present'}])
+    assert.equal(valid({...role,currentExperience:{...currentExperience,group}},anchors),false);
+  const ambiguousChild={...child,text:child.text+' Former role 2020 – 2022'};
+  const ambiguousParent={...parent,text:'Example Systems '+ambiguousChild.text};
+  const altered={...role,currentExperience:{...currentExperience,entryText:ambiguousChild.text,group:{company:'Example Systems',entryText:ambiguousParent.text}}};
+  assert.equal(valid(altered,[ambiguousParent,ambiguousChild,timing,altered]),false);
+});

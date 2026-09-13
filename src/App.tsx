@@ -8,6 +8,7 @@ import {accountSources,allConnections,archiveConnections,capture,changeStage,kee
 import {watchInbox} from './lib/inbox';
 import type {MboxWorkerResponse,MailboxWorkerResult} from './lib/mbox.worker';
 import {startExtensionBridge} from './lib/extension-bridge';
+import {buildExtensionSelfContext} from './lib/extension-self-context';
 import {requestedExtensionId,withoutExtensionRequest} from './lib/extension-pairing';
 import type {Connection} from './lib/discover';
 import DiscoverPanel from './components/DiscoverPanel';
@@ -58,6 +59,11 @@ export default function App(){
  const actionLock=useRef(false);const goalDirty=useRef(false);const refreshGeneration=useRef(0);
  const goalEditVersion=useRef(0);
  const isCurrent=()=>localKey.current===key&&accountGeneration.current===renderGeneration;
+ const selfEvidence=useMemo(()=>buildSelfEvidence(sources),[sources]);
+ // The bridge outlives renders. Only supply facts loaded for the current account,
+ // and re-check the synchronous auth boundary when a token request finishes.
+ const extensionSelf=useRef({uid,loadedSourcesKey,key,claims:selfEvidence});
+ extensionSelf.current={uid,loadedSourcesKey,key,claims:selfEvidence};
  const goalDependencies=useMemo(()=>({...goalHookDependencies,saveAccountGoal:async(accountId:string,goal:Goal,expectedVersion:number)=>{
   const saved=await goalHookDependencies.saveAccountGoal(accountId,goal,expectedVersion);
   // Refresh after the confirmed account write, even if the editor's later local read fails.
@@ -117,11 +123,16 @@ export default function App(){
   if(!extensionId){setExtensionStatus('Not connected. Add the extension ID from Chrome.');return;}
   if(!/^[a-p]{32}$/.test(extensionId)){setExtensionStatus('Check the extension ID: 32 letters, a through p.');return;}
   setExtensionStatus('Connecting to your account…');
-  const bridge=startExtensionBridge({extensionId,getAccessToken:async()=>((await db?.auth.getSession())?.data.session?.access_token||null),onStatus:(status:any)=>{if(active)setExtensionStatus(status?.connected?'Connected to your account':status?.message||'Account session needed');}});
+  const bridge=startExtensionBridge({extensionId,getAccessToken:async()=>((await db?.auth.getSession())?.data.session?.access_token||null),getSelfContext:()=>{
+   const context=extensionSelf.current;
+   return context.uid&&context.loadedSourcesKey===context.key&&localKey.current===context.key
+    ?buildExtensionSelfContext(context.uid,context.claims):null;
+  },onStatus:(status:any)=>{if(active)setExtensionStatus(status?.connected?'Connected to your account':status?.message||'Account session needed');}});
   extensionBridge.current=bridge;
   const subscription=db?.auth.onAuthStateChange(()=>void bridge.sync());
   return()=>{active=false;if(extensionBridge.current===bridge)extensionBridge.current=null;bridge.dispose();subscription?.data.subscription.unsubscribe();};
  },[extensionId]);
+ useEffect(()=>{void extensionBridge.current?.sync();},[uid,loadedSourcesKey,selfEvidence]);
  const dismissExtensionRequest=()=>{
   setExtensionRequest(null);
   if(window.location?.href)window.history.replaceState(window.history.state,'',withoutExtensionRequest(window.location.href));
@@ -164,7 +175,6 @@ export default function App(){
   return copied;
  };
  const connections=useMemo(()=>sources.archive?archiveConnections(sources.archive):pool,[sources.archive,pool]);
- const selfEvidence=useMemo(()=>buildSelfEvidence(sources),[sources]);
  const employers=useMemo(()=>(sources.archive||sources.accountFacts?.archive)?.layer1.positions.map(p=>p['Company Name']||p.Company||'').filter(Boolean)||[],[sources.archive,sources.accountFacts]);
  const savedUrls=useMemo(()=>new Set(people.map(p=>p.profile_url).filter((s):s is string=>!!s)),[people]);
  const selectedPerson=people.find(p=>p.id===selected);const selectedEvents=events.filter(e=>e.relationship_id===selected);

@@ -173,7 +173,12 @@ export function readProfile(doc:Document,url:string,now=new Date().toISOString()
    const bodyOnly=text.replace(/^(?:about|experience|education|skills|languages|licenses? (?:&|and) certifications?|certifications?)\s*/i,'').replace(/(?:show all(?: \d+)?[^.]*|see more|show more|add (?:experience|education|skills))$/i,'').trim();if(!bodyOnly)continue;
    add(kind,text,id);
    if(kind==='experience'||kind==='education')for(const date of dateRanges(text)){add('timing',date,id);if(kind==='experience'&&recentRoleStart(date,now))add('timing','Recent role start indicated by “'+date+'”. The rendered start date or month falls within the last 90 days.',id);}
-   if(kind==='experience')for(const field of currentExperienceFields(item,now,profileUrl))add('experience',field.text,id,field);
+   if(kind==='experience')for(const field of currentExperienceFields(item,now,profileUrl)){
+    // A grouped role has its own exact raw child in addition to the untouched
+    // parent group already stored above. Never splice the employer into its text.
+    if(field.currentExperience.group)add('experience',field.currentExperience.entryText,id);
+    add('experience',field.text,id,field);
+   }
   }
  }
  const missingSections:AnchorKind[]=(['experience','education','location','skills','languages','certifications','activity'] as AnchorKind[]).filter(kind=>!anchors.some(anchor=>anchor.kind===kind));
