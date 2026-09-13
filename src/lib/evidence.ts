@@ -1,6 +1,7 @@
 import type {CompanyOverlap} from './company-evidence';
 import type {LocalSources} from './workspace';
 import type {CurrentExperience} from './current-experience';
+import {parseStoredKnowledgeState} from './knowledge';
 import {cleanText, contentFingerprint, deepFreeze, stableStringify, stripQuotedRepliesAndSignature} from './text';
 
 export type EvidenceField = 'name' | 'company' | 'role' | 'industry' | 'location' | 'stage' | 'check_size' | 'education' | 'skill' | 'email' | 'url' | 'context' | 'custom' | 'writing' | 'proof_point';
@@ -129,6 +130,7 @@ export function buildSelfEvidence(sources: LocalSources): readonly EvidenceClaim
   const archive = sources.archive ?? sources.accountFacts?.archive;
   const resume = sources.resume ?? sources.accountFacts?.resume;
   const mailbox = sources.mailbox ?? sources.accountFacts?.mailbox;
+  const knowledge = parseStoredKnowledgeState(sources.knowledge);
   const layer = archive?.layer1;
   for (const group of ['profile', 'positions', 'education', 'skills'] as const) {
     layer?.[group].forEach((row, index) => {
@@ -157,13 +159,13 @@ export function buildSelfEvidence(sources: LocalSources): readonly EvidenceClaim
     }
     referenceMap.set('resume:0', ids);
   }
-  for (const [index, point] of (sources.knowledge?.knowledge.proofPoints ?? []).entries()) {
+  for (const [index, point] of (knowledge?.knowledge.proofPoints ?? []).entries()) {
     const ids = point.evidenceIds.flatMap(id => referenceMap.get(id) ?? []);
     // Synthesis is labeled as such and excluded from factual criterion evaluation.
     if (!point.evidenceIds.length || point.evidenceIds.some(id => !referenceMap.get(id)?.length)) continue;
     result.push(claim({subject: 'self', field: 'proof_point', text: point.text, sourceLabel: 'Career synthesis · proof point',
-      sourceKind: 'knowledge', sourceRef: `knowledge:${sources.knowledge!.fingerprint}/proofPoints/${index}`,
-      derivedFrom: [...new Set(ids)], observedAt: sources.knowledge!.createdAt, confidence: 'observed', appliesTo: 'contact'}));
+      sourceKind: 'knowledge', sourceRef: `knowledge:${knowledge!.fingerprint}/proofPoints/${index}`,
+      derivedFrom: [...new Set(ids)], observedAt: knowledge!.createdAt, confidence: 'observed', appliesTo: 'contact'}));
   }
   const samples = [...(archive?.writingSamples ?? []), ...(mailbox?.samples ?? [])].slice(0, 40);
   samples.forEach((sample, index) => {

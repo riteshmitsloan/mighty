@@ -67,7 +67,10 @@ test('resume line spans refer to exact cleaned LF-normalized text and do not inf
   assert.ok(result.every(c => c.sourceKind === 'resume' && c.field === 'context' && c.sourceRef === 'resume:resume-one'));
 });
 test('knowledge proof points retain original evidence references and missing-source synthesis is omitted', () => {
-  const knowledge = {fingerprint: 'knowledge-one', createdAt: 'today', knowledge: {proofPoints: [
+  const knowledge = {fingerprint: 'knowledge-one', createdAt: '2026-09-12T00:00:00Z', knowledge: {
+    keywords: ['finance', 'leadership', 'forecasting', 'research', 'manufacturing', 'education', 'planning', 'analysis', 'accounting', 'reporting', 'strategy', 'operations'],
+    throughlines: ['Finance leadership', 'Financial forecasting', 'Manufacturing experience'].map(text => ({text, evidenceIds: ['positions:0']})),
+    differentiators: [], industryQuestions: [], proofPoints: [
     {text: 'A finance leader', conversationType: 'hiring', evidenceIds: ['positions:0']},
     {text: 'Unverifiable claim', conversationType: 'hiring', evidenceIds: ['positions:999']}
   ]}} as KnowledgeState;

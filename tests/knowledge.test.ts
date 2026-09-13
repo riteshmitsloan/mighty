@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createKnowledgeSynthesizer, evidenceFor, knowledgeForStrategyBrief, validateKnowledge, type KnowledgeInput, type KnowledgeState } from '../src/lib/knowledge';
+import { createKnowledgeSynthesizer, evidenceFor, knowledgeForStrategyBrief, parseStoredKnowledgeState, validateKnowledge, type KnowledgeInput, type KnowledgeState } from '../src/lib/knowledge';
 import type { LayerOneSnapshot } from '../src/lib/archive';
+import { buildSelfEvidence } from '../src/lib/evidence';
+import type { LocalSources } from '../src/lib/workspace';
 const facts: LayerOneSnapshot = {
   id: 'snapshot-1', importedAt: '2026-09-12', fingerprint: 'raw-facts',
   profile: [{ 'First Name': 'Alex', 'Last Name': 'Rivera' }],
@@ -80,4 +82,59 @@ test('empty sources are refused without a model request', async () => {
 test('bounded synthesis refuses silent source truncation', async () => {
   let calls = 0; const synthesize = createKnowledgeSynthesizer({ read: async () => null, persist: async () => ({}), gateway: async () => { calls++; return { text: '', remaining: 10 }; } });
   await assert.rejects(synthesize({ ...input, resumeText: '你'.repeat(16_000) }), /input limit/); assert.equal(calls, 0);
+});
+
+const stored = () => ({fingerprint: 'persisted-knowledge', createdAt: '2026-09-12T00:00:00.000Z', knowledge: valid()});
+test('persisted knowledge accepts the complete current schema without changing or freezing stored JSON', () => {
+  const state = stored(); const before = JSON.stringify(state);
+  assert.equal(parseStoredKnowledgeState(state), state);
+  assert.equal(knowledgeForStrategyBrief(state), state.knowledge);
+  assert.equal(JSON.stringify(state), before); assert.equal(Object.isFrozen(state.knowledge.proofPoints), false);
+  const claims = buildSelfEvidence({resume: {text: input.resumeText, pages: 1, fingerprint: 'resume'}, knowledge: state as KnowledgeState});
+  assert.ok(claims.some(item => item.sourceKind === 'knowledge' && item.text === 'Mentored 12 people'));
+});
+test('legacy or malformed persisted knowledge is ignored as a whole while original source claims survive', () => {
+  const corruptions: Array<[string, (state: Record<string, any>) => unknown]> = [
+    ['missing wrapper', () => valid()], ['missing inner knowledge', state => { delete state.knowledge; return state; }],
+    ['null inner knowledge', state => ({...state, knowledge: null})], ['invalid timestamp', state => ({...state, createdAt: 'not a timestamp'})],
+    ['invalid fingerprint', state => ({...state, fingerprint: {value: 'bad'}})],
+    ...['keywords', 'throughlines', 'differentiators', 'proofPoints', 'industryQuestions'].map(field => [
+      `${field} is not an array`, (state: Record<string, any>) => { state.knowledge[field] = {}; return state; }
+    ] as [string, (state: Record<string, any>) => unknown]),
+    ['null point', state => { state.knowledge.proofPoints.push(null); return state; }],
+    ['wrong point text', state => { state.knowledge.proofPoints[0].text = {}; return state; }],
+    ['unknown conversation type', state => { state.knowledge.proofPoints[0].conversationType = 'other'; return state; }],
+    ...['throughlines', 'differentiators', 'proofPoints', 'industryQuestions'].flatMap(field => [
+      [`${field} string references`, (state: Record<string, any>) => { state.knowledge[field][0].evidenceIds = 'positions:0'; return state; }],
+      [`${field} object reference`, (state: Record<string, any>) => { state.knowledge[field][0].evidenceIds = [{}]; return state; }]
+    ] as Array<[string, (state: Record<string, any>) => unknown]>),
+    ['missing supporting quote', state => { delete state.knowledge.differentiators[0].quote; return state; }],
+    ['invalid questions', state => { state.knowledge.industryQuestions[0].questions = 'question'; return state; }],
+    ['invalid question member', state => { state.knowledge.industryQuestions[0].questions[0] = {}; return state; }],
+    ['missing industry', state => { delete state.knowledge.industryQuestions[0].industry; return state; }]
+  ];
+  for (const [label, corrupt] of corruptions) {
+    const state = corrupt(stored()); const before = JSON.stringify(state);
+    assert.equal(parseStoredKnowledgeState(state), null, label);
+    assert.equal(knowledgeForStrategyBrief(state), null, label);
+    const sources = {resume: {text: 'My original career fact.', pages: 1, fingerprint: 'original'}, knowledge: state} as LocalSources;
+    const claims = buildSelfEvidence(sources);
+    assert.equal(claims.length, 1, label); assert.equal(claims[0].text, 'My original career fact.', label);
+    assert.equal(claims[0].sourceKind, 'resume', label); assert.equal(JSON.stringify(state), before, label);
+  }
+});
+test('a malformed or unsupported same-fingerprint cache cannot bypass synthesis validation', async () => {
+  let cache: unknown = null; let calls = 0; let writes = 0;
+  const synthesize = createKnowledgeSynthesizer({read: async () => cache,
+    persist: async state => { cache = state; writes++; return {}; },
+    gateway: async () => { calls++; return {text: JSON.stringify(valid()), remaining: 10}; }
+  });
+  const good = await synthesize(input);
+  const malformed = {fingerprint: good.fingerprint, createdAt: good.createdAt}; cache = malformed;
+  const malformedBefore = JSON.stringify(malformed);
+  await synthesize(input); assert.equal(calls, 2); assert.equal(writes, 2);
+  assert.equal(JSON.stringify(malformed), malformedBefore);
+  const forged = structuredClone(good); (forged.knowledge.proofPoints[0] as {text: string}).text = 'Raised $900 million'; cache = forged;
+  await synthesize(input); assert.equal(calls, 3); assert.equal(writes, 3);
+  assert.equal(forged.knowledge.proofPoints[0].text, 'Raised $900 million');
 });

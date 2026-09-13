@@ -44,6 +44,24 @@ function overlapPerson(companies=['Current Fixture Company'],dateRange='2025 - P
  return {...person('overlap-fixture','Overlap Fixture',profileUrl),profile:{profileUrl,profileReadAt:observedAt,truncated:false,source:'rendered_profile',anchors}};
 }
 
+for(const [label,knowledge] of [
+ ['an empty legacy summary',{}],
+ ['a null nested summary',{fingerprint:'fixture',createdAt:'2026-09-13T12:00:00Z',knowledge:null}],
+ ['a malformed proof point',{fingerprint:'fixture',createdAt:'2026-09-13T12:00:00Z',knowledge:{proofPoints:[{text:'Synthetic claim',evidenceIds:'position:0'}]}}],
+])test(`signing in with ${label} keeps the app and imported sources available`,async()=>{
+ s.uid=null;const savedArchive=archive(7),before=structuredClone(savedArchive);let writes=0,calls=0;
+ s.settings=async()=>({data:{data:{strategy:'Server goal',knowledge}},error:null});
+ s.localSources=async uid=>uid==='user-a'?{archive:savedArchive}:{};
+ s.saveSettings=async()=>{writes++;};s.gateway=async()=>{calls++;throw Error('Unexpected model call');};
+ await boot();await switchAccount('user-a');
+ assert.ok(button('Today'),'The signed-in app remains rendered.');
+ await click('Me');await click("Things you've learned");
+ assert.match(text(),/7 connections/);assert.match(text(),/Save to account/);
+ await openGoal();assert.equal(document.querySelector('textarea').value,'Server goal');
+ assert.deepEqual(savedArchive,before,'A rejected derived summary never changes the source archive.');
+ assert.equal(writes,0);assert.equal(calls,0);assert.equal(s.localWrites.length,0);
+});
+
 test('a saved profile uses its validated current company and preserves the imported overlap statement in goal reasons',async()=>{
  const current=overlapFact('Current Fixture Company',3),earlier=overlapFact('Earlier Fixture Company',9);
  const index={'current fixture company':current,'earlier fixture company':earlier};

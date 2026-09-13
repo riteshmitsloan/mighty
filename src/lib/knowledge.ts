@@ -19,7 +19,7 @@ export interface Knowledge {
 export interface KnowledgeState { readonly fingerprint: string; readonly knowledge: Knowledge; readonly createdAt: string; }
 export interface KnowledgeDependencies {
   gateway: (body: { feature: 'profile_briefing'; system: string; user: string; maxTokens: number }) => Promise<{ text: string; remaining: number }>;
-  read: () => Promise<KnowledgeState | null>;
+  read: () => Promise<unknown>;
   persist: (state: KnowledgeState) => PromiseLike<PersistenceResult<unknown>>;
 }
 export function evidenceFor(input: KnowledgeInput): Evidence[] {
@@ -40,6 +40,45 @@ function validReferences(value: unknown, evidence: readonly Evidence[]): string[
   const ids = strings(value, 'evidence references', 1, 20);
   if (ids.some(id => !evidence.some(e => e.id === id))) throw new Error('Knowledge response cited missing evidence.');
   return ids;
+}
+/** Persisted JSON may predate this schema. Reject the whole derived state without changing its sources. */
+export function parseStoredKnowledgeState(value: unknown): KnowledgeState | null {
+  try {
+    if (!isObject(value) || typeof value.fingerprint !== 'string' || !value.fingerprint.trim()
+      || value.fingerprint.length > 200 || typeof value.createdAt !== 'string'
+      || value.createdAt.length > 100 || !Number.isFinite(Date.parse(value.createdAt))
+      || !isObject(value.knowledge)) return null;
+    const knowledge = value.knowledge;
+    const keywords = strings(knowledge.keywords, 'keywords', 12, 25);
+    if (new Set(keywords.map(word => word.toLowerCase())).size !== keywords.length) return null;
+    const claims = (raw: unknown, min: number, max: number) => {
+      if (!Array.isArray(raw) || raw.length < min || raw.length > max) throw new Error('Invalid stored claims.');
+      return raw.map(item => {
+        if (!isObject(item) || typeof item.text !== 'string' || !item.text.trim() || item.text.length > 1_500) throw new Error('Invalid stored claim.');
+        strings(item.evidenceIds, 'evidence references', 1, 20);
+        return item;
+      });
+    };
+    claims(knowledge.throughlines, 3, 5);
+    for (const item of claims(knowledge.differentiators, 0, 12)) {
+      if (typeof item.quote !== 'string' || !item.quote.trim()) return null;
+    }
+    for (const item of claims(knowledge.proofPoints, 0, 24)) {
+      if (typeof item.conversationType !== 'string' || !['fundraising', 'hiring', 'advisory', 'partnership'].includes(item.conversationType)) return null;
+    }
+    if (!Array.isArray(knowledge.industryQuestions)) return null;
+    const industries = new Set<string>();
+    for (const item of knowledge.industryQuestions) {
+      if (!isObject(item) || typeof item.industry !== 'string' || !item.industry.trim()) return null;
+      const industry = item.industry.trim().toLowerCase();
+      if (industries.has(industry)) return null;
+      industries.add(industry);
+      strings(item.evidenceIds, 'evidence references', 1, 20);
+      strings(item.questions, 'industry questions', 3, 3);
+    }
+    // Keep valid cached identities stable; validation never freezes or mutates caller-owned JSON.
+    return value as unknown as KnowledgeState;
+  } catch { return null; }
 }
 const numericClaims = (s: string) => [...s.matchAll(/\d[\d,.]*(?:%|[kKmMbB])?/g)].map(m => m[0].toLowerCase());
 function groundedNumbers(text: string, evidenceText: string): void {
@@ -101,7 +140,11 @@ export function createKnowledgeSynthesizer(deps: KnowledgeDependencies) {
     const fingerprint = await contentFingerprint({ evidence, permittedDirectIndustries });
     const existing = inFlight.get(fingerprint); if (existing) return existing;
     const task = serial.catch(() => undefined).then(async () => {
-      const saved = await deps.read(); if (saved?.fingerprint === fingerprint) return saved;
+      const saved = parseStoredKnowledgeState(await deps.read());
+      if (saved?.fingerprint === fingerprint) {
+        try { validateKnowledge(saved.knowledge, input, evidence); return saved; }
+        catch { /* A malformed or unsupported cached synthesis cannot satisfy this request. */ }
+      }
       const user = `DATA\n${stableStringify({ evidence, permittedDirectIndustries })}\nEND_DATA`;
       // Refuse silent source truncation; the UI can request a smaller explicit input set.
       if (new TextEncoder().encode(SYSTEM + user).byteLength + 600 > 48_000) throw new Error('These career facts exceed the synthesis input limit. The raw knowledge base is still preserved.');
@@ -119,4 +162,4 @@ export function createKnowledgeSynthesizer(deps: KnowledgeDependencies) {
   };
 }
 /** Deliberately a strategy-only interface: no UI display formatter is exported. */
-export function knowledgeForStrategyBrief(state: KnowledgeState | null): Readonly<Knowledge> | null { return state?.knowledge ?? null; }
+export function knowledgeForStrategyBrief(state: unknown): Readonly<Knowledge> | null { return parseStoredKnowledgeState(state)?.knowledge ?? null; }
