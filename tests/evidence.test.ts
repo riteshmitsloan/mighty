@@ -36,6 +36,16 @@ test('rendered profile anchors retain actual source references and only explicit
   assert.equal(buildCandidateEvidence({...input, profileReadAt: null}).completeProfile, false);
   assert.equal(Object.isFrozen(input.anchors), false);
 });
+test('a free-form headline remains sourced context and cannot make a headline-only read complete', () => {
+  const anchor = {kind: 'headline', text: 'Exploring CEO roles', sourceUrl: 'https://linkedin.com/in/synthetic-person#profile', observedAt: '2026-09-12T00:00:00Z'};
+  const result = buildCandidateEvidence({name: 'Synthetic person', anchors: [anchor], completeProfile: true, profileReadAt: anchor.observedAt});
+  const preserved = result.claims.find(item => item.text === anchor.text)!;
+  assert.equal(preserved.field, 'context'); assert.equal(preserved.sourceKind, 'profile');
+  assert.equal(preserved.sourceRef, anchor.sourceUrl); assert.equal(preserved.observedAt, anchor.observedAt);
+  assert.equal(result.completeProfile, false); assert.equal(result.claims.some(item => item.field === 'role'), false);
+  const withExperience = buildCandidateEvidence({name: 'Synthetic person', anchors: [anchor, {kind: 'experience', text: 'Built forecasting tools.'}], completeProfile: true, profileReadAt: anchor.observedAt});
+  assert.equal(withExperience.completeProfile, true);
+});
 test('manual context is user-confirmed evidence and claims from another subject or candidate are refused', () => {
   const good = candidateClaim({subjectKey: 'sam'}); const bad = candidateClaim({subjectKey: 'elsewhere'});
   const own = candidateClaim({subject: 'self'});

@@ -1,4 +1,5 @@
-import {goalFit} from './scoring.js';
+import {assessProfileGoals} from './goal-assessment.js';
+import type {AccountGoalContext} from './goal-context.js';
 import {initialSelection, toggleSelection} from './selection.js';
 import type {AnchorKind, PageSnapshot, Profile, SaveInput} from './types.js';
 
@@ -9,7 +10,10 @@ const saveButton = document.querySelector('#save')! as HTMLButtonElement;
 const selectionSummary = document.querySelector('#selection-summary')!;
 let state: PageSnapshot | null = null;
 let userId: string | null = null;
-let strategy = '', connected = false, selected = new Set<string>(), saving = false, readGeneration = 0;
+let goalContext: AccountGoalContext | null = null;
+let refreshPending = false, goalRefreshPending = false, lastRefreshError = '';
+let accountEpoch = 0;
+let connected = false, selected = new Set<string>(), saving = false, readGeneration = 0;
 const operations = new Map<string, SaveInput>();
 const sectionLabels: Record<AnchorKind, string> = {
   headline: 'Headline', location: 'Location', about: 'About', experience: 'Experience',
@@ -45,6 +49,11 @@ async function send(message: unknown) {
 }
 
 function report(message: string) {notice.textContent = message;}
+function invalidateAccountView() {
+  connected = false; goalContext = null;
+  const label = account.querySelector('.account-state');
+  if (label) {label.textContent = 'Account not connected'; label.classList.remove('connected');}
+}
 
 function updateSave() {
   saveButton.disabled = saving || !connected || !state || (state.kind === 'profile'
@@ -72,20 +81,62 @@ function anchorText(text: string) {
     .replace(/^Recent rendered activity:/, 'Recent activity:');
 }
 
+function renderGoalAssessments() {
+  const section = el('section', undefined, 'account-goals');
+  section.append(el('h2', 'Account goals'));
+  if (!connected || !userId || !goalContext) {
+    section.append(el('p', 'Reconnect from Mighty to load your saved goals. No previous account context is used.', 'hint'));
+    body.append(section); return;
+  }
+  try {
+    const result = assessProfileGoals(userId, goalContext, state);
+    if (result.state !== 'ready') {section.append(el('p', result.message, 'hint')); body.append(section); return;}
+    section.append(el('p', 'Profile evidence only. Self evidence and shared-employer routes aren’t included.', 'hint'));
+    for (const [index, {goal, assessment}] of result.assessments.entries()) {
+      const card = el('details', undefined, 'goal-fit');
+      card.open = index === 0;
+      card.dataset.goalId = goal.id;
+      card.dataset.goalVersion = String(goal.version);
+      card.append(el('summary', goal.title));
+      card.append(el('p', `Saved version ${goal.version}`, 'hint goal-version'));
+      for (const reason of assessment.reasons) card.append(el('p', reason, 'reason'));
+      if (!assessment.reasons.length) card.append(el('p', 'The visible evidence does not yet establish this goal’s criteria.', 'reason'));
+      const label = el('span', assessment.label, 'fit-label');
+      label.dataset.fit = assessment.status === 'unknown' ? 'insufficient' : assessment.status === 'contradicted' || assessment.status === 'conflicting' ? 'none' : 'overlap';
+      card.append(label);
+      if (assessment.unknowns.length) {
+        card.append(el('h3', 'Still unknown'));
+        const unknowns = el('ul', undefined, 'goal-unknowns');
+        for (const unknown of assessment.unknowns) unknowns.append(el('li', unknown));
+        card.append(unknowns);
+      }
+      const evidenceIds = new Set(assessment.reasonDetails.flatMap(reason => reason.claimIds));
+      const evidence = result.candidate.claims.filter(claim => evidenceIds.has(claim.id));
+      if (evidence.length) {
+        const sources = el('details', undefined, 'assessment-sources');
+        sources.append(el('summary', 'Supporting source text'));
+        for (const claim of evidence) {
+          const fact = el('div');
+          fact.append(el('p', claim.text));
+          const source = el('a', claim.sourceLabel);
+          source.href = claim.sourceRef!; source.target = '_blank'; source.rel = 'noopener noreferrer';
+          fact.append(source, el('p', `Observed ${claim.observedAt}`, 'hint'));
+          sources.append(fact);
+        }
+        card.append(sources);
+      }
+      section.append(card);
+    }
+  } catch {section.replaceChildren(el('p', 'Saved goals could not be verified. Reconnect from Mighty to refresh them.', 'warning'));}
+  body.append(section);
+}
+
 function renderProfile(profile: Profile) {
   body.append(el('h1', profile.name));
   const headline = profile.anchors.find(anchor => anchor.kind === 'headline');
   if (headline) body.append(el('p', headline.text, 'profile-headline'));
 
-  const fit = goalFit(strategy, profile);
-  const card = el('div', undefined, 'goal-fit');
-  let reason = fit.reason.replace(/complete rendered profile/g, 'profile').replace(/rendered profile/g, 'profile');
-  if (fit.evidence[0]?.text.length > 260) reason = reason.replace(/”$/, '…”');
-  const fitLabel = el('span', fit.label, 'fit-label');
-  fitLabel.dataset.fit = fit.label === 'Not enough context' ? 'insufficient' : fit.label === 'No clear goal overlap' ? 'none' : 'overlap';
-  // The explanation stays before the local goal-fit label.
-  card.append(el('p', reason, 'reason'), fitLabel);
-  body.append(card);
+  renderGoalAssessments();
 
   if (profile.truncated) body.append(el('p', 'This read exceeds the save limit. Its full context cannot be saved.', 'warning'));
   const timing = profile.anchors.filter(anchor => anchor.kind === 'timing');
@@ -166,15 +217,17 @@ function render() {
   updateSave();
 }
 
-async function refresh() {
+async function refresh(refreshGoals = false) {
   const generation = ++readGeneration;
   try {
-    const [status, read] = await Promise.all([send({type: 'mighty:status'}), send({type: 'mighty:read_active'})]);
+    const [status, read] = await Promise.all([send({type: 'mighty:status', refreshGoals}), send({type: 'mighty:read_active'})]);
     if (generation !== readGeneration) return;
-    if (userId !== status.userId) {operations.clear(); selected.clear();}
+    if (userId !== status.userId) {accountEpoch++; operations.clear(); selected.clear();}
     userId = status.userId;
-    strategy = status.strategy;
+    goalContext = status.connected ? status.goalContext ?? null : null;
     connected = status.connected;
+    if (status.message) {lastRefreshError = status.message; report(status.message);}
+    else {if (notice.textContent === lastRefreshError) report(''); lastRefreshError = '';}
     account.replaceChildren(el('span', connected ? 'Account connected' : 'Account not connected', `account-state ${connected ? 'connected' : ''}`));
     const link = el('a', 'Open Mighty');
     link.href = status.appOrigin;
@@ -193,9 +246,11 @@ async function refresh() {
     }
     render();
   } catch (error) {
-    connected = false;
+    if (generation !== readGeneration) return;
+    invalidateAccountView();
+    render();
     body.setAttribute('aria-busy', 'false');
-    report((error as Error).message);
+    lastRefreshError = (error as Error).message; report(lastRefreshError);
     updateSave();
   }
 }
@@ -211,7 +266,7 @@ saveButton.addEventListener('click', async () => {
       truncated: result.truncated, truncationReasons: result.truncated ? ['search_text_limit'] : [],
     })) : [];
   const source = state.kind === 'profile' ? 'rendered_profile' : 'search_result';
-  const owner = userId;
+  const owner = userId, saveEpoch = accountEpoch;
   const results = await Promise.allSettled(profiles.map(async profile => {
     const key = owner + '|' + profile.profileUrl + '|' + source;
     let request = operations.get(key);
@@ -226,10 +281,12 @@ saveButton.addEventListener('click', async () => {
   const saved = results.filter(result => result.status === 'fulfilled').length;
   for (const result of results) if (result.status === 'fulfilled') selected.delete(result.value);
   const failure = results.find(result => result.status === 'rejected') as PromiseRejectedResult | undefined;
-  report(failure ? (saved ? `${saved} saved. ` : '') + String(failure.reason?.message || 'A save is still pending.')
+  if (saveEpoch !== accountEpoch) report('');
+  else report(failure ? (saved ? `${saved} saved. ` : '') + String(failure.reason?.message || 'A save is still pending.')
     : saved === 1 ? 'Saved. Open Mighty to view.' : `${saved} people saved. Open Mighty to view.`);
   saving = false;
   render();
+  if (refreshPending) {refreshPending = false; const refreshGoals = goalRefreshPending; goalRefreshPending = false; void refresh(refreshGoals);}
 });
 
 document.querySelector('#skip')!.addEventListener('click', () => window.close());
@@ -237,15 +294,18 @@ let reconnect: ReturnType<typeof setTimeout> | undefined;
 function connect() {
   try {
     const port = chrome.runtime.connect({name: 'mighty:popup'});
-    port.onMessage.addListener(() => {if (!saving) void refresh();});
+    port.onMessage.addListener(message => {
+      if (message?.type === 'mighty:account_changed') {accountEpoch++; readGeneration++; invalidateAccountView(); render();}
+      if (saving) refreshPending = true; else void refresh();
+    });
     port.onDisconnect.addListener(() => {
-      connected = false;
-      updateSave();
+      accountEpoch++; invalidateAccountView(); readGeneration++;
+      render();
       clearTimeout(reconnect);
       reconnect = setTimeout(() => {connect(); void refresh();}, 100);
     });
   } catch {report('Mighty was reloaded. Reopen the extension.');}
 }
-addEventListener('focus', () => void refresh());
+addEventListener('focus', () => {if (saving) {refreshPending = true; goalRefreshPending = true;} else void refresh(true);});
 connect();
-void refresh();
+void refresh(true);

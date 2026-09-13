@@ -1,6 +1,8 @@
 import { BlobReader, BlobWriter, TextReader, TextWriter, ZipReader, ZipWriter, type FileEntry } from '@zip.js/zip.js';
 import { CsvStreamParser, encodeCsv, type RawFact } from './csv';
 import { contentFingerprint, deepFreeze, normalizeName, stripQuotedRepliesAndSignature } from './text';
+import {companyKey, companyOverlapFor, type CompanyOverlap} from './company-evidence';
+export {companyKey, companyOverlapFor, type CompanyOverlap} from './company-evidence';
 
 export interface Connection {
   readonly firstName: string; readonly lastName: string; readonly url: string;
@@ -16,7 +18,6 @@ export interface ArchiveCounts {
   sentMessages: number; receivedMessages: number; unidentifiedMessages: number; threads: number; invitations: number;
 }
 export interface ArchiveProgress extends ArchiveCounts { phase: 'reading' | 'complete'; file: string; bytesRead: number; }
-export interface CompanyOverlap { readonly company: string; readonly count: number; readonly statement: string; }
 export interface ArchiveResult {
   /** Includes facts, the entire connection pool, own samples, and aggregate source counts. */
   readonly fingerprint: string;
@@ -59,10 +60,6 @@ function isHeader(kind: Kind, row: string[]): boolean {
   return has('From', 'To', 'Direction', 'Sent At', 'Invitation Sent At');
 }
 
-/** These normalizations alter the lookup key only; source company spelling remains a raw fact. */
-export function companyKey(company: string): string {
-  return company.normalize('NFKC').replace(/&amp;/gi, '&').replace(/&#0*38;/g, '&').replace(/&quot;/gi, '"').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en-US');
-}
 export function decodedCompanyIndex(connections: readonly Connection[]): Readonly<Record<string, CompanyOverlap>> {
   const companies = new Map<string, { company: string; people: Set<string> }>();
   for (const person of connections) {
@@ -76,9 +73,6 @@ export function decodedCompanyIndex(connections: readonly Connection[]): Readonl
     .sort(([ak, a], [bk, b]) => b.people.size - a.people.size || ak.localeCompare(bk)).slice(0, 500)
     .map(([key, value]) => [key, { company: value.company, count: value.people.size, statement: `You already know ${value.people.size} people at ${value.company}` }] as const);
   return deepFreeze(Object.fromEntries(entries));
-}
-export function companyOverlapFor(index: Readonly<Record<string, CompanyOverlap>>, company: string): CompanyOverlap | null {
-  return Object.hasOwn(index, companyKey(company)) ? index[companyKey(company)] : null;
 }
 /** The model's output cannot replace the overlap fact. */
 export function attachCompanyOverlap<T extends { company: string }>(row: T, index: Readonly<Record<string, CompanyOverlap>>): T & { companyOverlap: CompanyOverlap | null } {

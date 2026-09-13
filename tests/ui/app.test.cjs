@@ -33,6 +33,33 @@ const boot=async()=>act(async()=>{root.render(React.createElement(App));await ti
 const openGoal=async()=>{await click('Me');await click('Goal');};
 const switchAccount=async uid=>act(async()=>{s.uid=uid;for(const f of s.authListeners)f('SIGNED_IN',uid?{user:{id:uid}}:null);await tick();await tick();});
 
+test('extension goals refresh only after an account save is confirmed',async()=>{
+ localStorage.setItem('mighty-extension-id','a'.repeat(32));let syncs=0;const cloud=deferred();
+ s.extensionSync=async()=>{syncs++;};s.saveAccountGoal=()=>cloud.promise;
+ await boot();await openGoal();await input(document.querySelector('textarea'),'Updated account goal');
+ assert.equal(syncs,0,'Typing is private until saved.');
+ await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();});
+ assert.equal(syncs,0,'An in-flight save is not confirmed.');
+ await act(async()=>{cloud.resolve({});await tick();await tick();});
+ assert.equal(syncs,1);assert.match(text(),/Goal saved to your account/);
+});
+test('a failed account goal save keeps the local edit without refreshing extension goals',async()=>{
+ localStorage.setItem('mighty-extension-id','a'.repeat(32));let syncs=0;
+ s.extensionSync=async()=>{syncs++;};s.saveAccountGoal=async()=>{throw Error('Account offline');};
+ await boot();await openGoal();await input(document.querySelector('textarea'),'Local goal awaiting connection');
+ await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();await tick();});
+ assert.equal(syncs,0);assert.match(text(),/Your edit is kept on this device/);assert.equal(document.querySelector('textarea').value,'Local goal awaiting connection');
+});
+test('a late goal save cannot refresh the extension for the previous account',async()=>{
+ localStorage.setItem('mighty-extension-id','a'.repeat(32));let syncs=0;const cloud=deferred();
+ s.extensionSync=async()=>{syncs++;};s.saveAccountGoal=()=>cloud.promise;
+ await boot();await openGoal();await input(document.querySelector('textarea'),'Goal for account A');
+ await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();});
+ await switchAccount('user-b');const afterSwitch=syncs;
+ await act(async()=>{cloud.resolve({});await tick();await tick();});
+ assert.equal(syncs,afterSwitch);assert.doesNotMatch(text(),/Goal for account A/);
+});
+
 test('goal typed before delayed hydration survives the server and local replies',async()=>{
  const local=deferred(),server=deferred();s.localSources=()=>local.promise;s.settings=()=>server.promise;await boot();await openGoal();
  await input(document.querySelector('textarea'),'My unsaved typed goal');

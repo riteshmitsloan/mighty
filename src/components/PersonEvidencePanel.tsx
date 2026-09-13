@@ -2,7 +2,8 @@ import {useEffect, useMemo, useRef, useState} from 'react';
 import type {Goal} from '../lib/goals';
 import type {Person} from '../lib/workspace';
 import type {GatewayCall} from '../lib/platform';
-import {buildCandidateEvidence, type EvidenceAnchor, type EvidenceClaim} from '../lib/evidence';
+import type {EvidenceClaim} from '../lib/evidence';
+import {buildSavedPersonEvidence} from '../lib/person-evidence';
 import {assessCandidate} from '../lib/assessment';
 import {listRelationshipContext, saveCandidateObservation, normalizeCandidateObservation, observationsToClaims, type CandidateObservationInput, type MessageDraft} from '../lib/relationship-context';
 import ConversationPanel from './ConversationPanel';
@@ -51,13 +52,7 @@ function PersonEvidenceEditor({uid, person, goals, activeGoal, selfEvidence, cal
     const replaced = new Set(observations.map(item => item.supersedesId).filter(Boolean));
     return observations.filter(item => !replaced.has(item.id));
   }, [observations]);
-  const baseCandidate = useMemo(() => {
-    const anchors = Array.isArray(person.profile?.anchors) ? person.profile!.anchors.filter((value): value is EvidenceAnchor => Boolean(value && typeof value === 'object' && typeof value.text === 'string' && typeof value.kind === 'string')) : [];
-    return buildCandidateEvidence({id: person.id, person: person.person, profile_url: person.profile_url,
-      company: typeof person.context.company === 'string' ? person.context.company : '', position: typeof person.context.position === 'string' ? person.context.position : '',
-      sourceLabel: 'Saved person record', sourceKind: person.context.source === 'web_search' ? 'web' : 'record', anchors, completeProfile: Boolean(person.profile),
-      profileReadAt: typeof person.profile?.observedAt === 'string' ? person.profile.observedAt : typeof person.context.profile_read_at === 'string' ? person.context.profile_read_at : null});
-  }, [person]);
+  const baseCandidate = useMemo(() => buildSavedPersonEvidence(person), [person]);
   const candidateForGoal = (goalId: string | null) => ({...baseCandidate, claims: [...baseCandidate.claims, ...observationsToClaims(observations, person.id, goalId)]});
   const candidate = useMemo(() => candidateForGoal(activeGoal?.id ?? null), [baseCandidate, observations, person.id, activeGoal?.id]);
   const assessments = useMemo(() => goals.filter(goal => goal.status === 'active').map(goal => {

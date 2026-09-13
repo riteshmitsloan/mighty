@@ -7,7 +7,7 @@ export function startExtensionBridge(options:BridgeOptions){
  let stopped=false,port:chrome.runtime.Port|undefined,timer:ReturnType<typeof setTimeout>|undefined,attempt=0,syncGeneration=0;
  async function sync(){const generation=++syncGeneration;try{const token=await options.getAccessToken();if(stopped||generation!==syncGeneration)return;
  const reply=token?await connectExtension(options.extensionId,token):await disconnectExtension(options.extensionId);if(!stopped&&generation===syncGeneration)options.onStatus?.(reply);
- }catch{if(!stopped)options.onStatus?.({ok:false,connected:false,message:'Extension connection is unavailable. Check that the unpacked extension is enabled.'});}}
+ }catch{if(!stopped&&generation===syncGeneration)options.onStatus?.({ok:false,connected:false,message:'Extension connection is unavailable. Check that the unpacked extension is enabled.'});}}
  function open(){if(stopped)return;try{
  port=chrome.runtime.connect(options.extensionId,{name:'mighty:bridge'});
  port.onMessage.addListener(message=>{if(message?.type==='mighty:ready'&&message.protocol===1){attempt=0;void sync();}});

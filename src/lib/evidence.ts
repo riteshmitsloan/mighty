@@ -1,4 +1,4 @@
-import type {CompanyOverlap} from './archive';
+import type {CompanyOverlap} from './company-evidence';
 import type {LocalSources} from './workspace';
 import {cleanText, contentFingerprint, deepFreeze, stableStringify, stripQuotedRepliesAndSignature} from './text';
 
@@ -179,22 +179,27 @@ export function buildCandidateEvidence(input: CandidateInput): CandidateEvidence
   const sourceLabel = input.sourceLabel ?? (sourceKind === 'archive' ? 'Connection archive' : 'Saved contact record');
   const sourceRef = text(input.profile_url || input.url) || `candidate:${key}`;
   const claims: EvidenceClaim[] = [];
+  const headlineClaimIds = new Set<string>();
   const add = (field: EvidenceField, value: unknown, details: Partial<EvidenceClaim> = {}, discriminator: unknown = '') => {
     if (!text(value)) return;
-    claims.push(claim({subject: 'candidate', subjectKey: key, field, text: text(value), sourceKind,
+    const item = claim({subject: 'candidate', subjectKey: key, field, text: text(value), sourceKind,
       sourceLabel, sourceRef, ...(input.observedAt ? {observedAt: input.observedAt} : {}),
-      confidence: sourceKind === 'manual' ? 'user_confirmed' : 'observed', appliesTo: 'contact', ...details}, discriminator));
+      confidence: sourceKind === 'manual' ? 'user_confirmed' : 'observed', appliesTo: 'contact', ...details}, discriminator);
+    claims.push(item);
+    return item;
   };
   const name = text(input.name || input.person || `${input.firstName || ''} ${input.lastName || ''}`);
   add('name', name); add('company', input.company); add('role', input.position || input.role);
   add('email', input.email); add('url', input.profile_url || input.url);
   for (const field of ['location', 'industry', 'stage', 'check_size'] as const) add(field, input[field]);
   for (const [index, anchor] of (input.anchors ?? []).entries()) {
-    const field = anchor.field ?? ({headline: 'role', experience: 'context', about: 'context', education: 'education',
+    // A headline may describe an aspiration or topic, not a role the person holds.
+    const field = anchor.field ?? ({headline: 'context', experience: 'context', about: 'context', education: 'education',
       skills: 'skill', skill: 'skill', location: 'location', industry: 'industry'} as Record<string, EvidenceField>)[anchor.kind] ?? 'context';
-    add(field, anchor.text, {sourceKind: 'profile', sourceLabel: `Rendered profile · ${anchor.kind}`,
+    const added = add(field, anchor.text, {sourceKind: 'profile', sourceLabel: `Rendered profile · ${anchor.kind}`,
       sourceRef: anchor.sourceUrl || sourceRef, ...(anchor.observedAt ? {observedAt: anchor.observedAt} : {}),
       appliesTo: anchor.appliesTo ?? 'contact', ...(anchor.polarity ? {polarity: anchor.polarity} : {})}, index);
+    if (anchor.kind === 'headline' && added) headlineClaimIds.add(added.id);
   }
   const manual = typeof input.manualContext === 'string' ? [input.manualContext] : input.manualContext ?? [];
   manual.forEach((value, index) => add('context', value, {sourceKind: 'manual', sourceLabel: 'User-provided context', confidence: 'user_confirmed'}, index));
@@ -203,7 +208,8 @@ export function buildCandidateEvidence(input: CandidateInput): CandidateEvidence
     claims.push(deepFreeze(structuredClone({...item, subjectKey: key})));
   }
   const unique = distinctEvidenceClaims(claims);
-  const substantive = unique.some(item => item.sourceKind === 'profile' && !['name', 'url', 'email', 'role'].includes(item.field));
+  const substantive = unique.some(item => item.sourceKind === 'profile' && !headlineClaimIds.has(item.id)
+    && !['name', 'url', 'email', 'role'].includes(item.field));
   return deepFreeze({key, name, company: text(input.company), claims: unique,
     profileReadAt: input.profileReadAt ?? null,
     completeProfile: Boolean(input.completeProfile && input.profileReadAt && substantive),

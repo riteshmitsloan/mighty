@@ -16,5 +16,5 @@ export function startExtensionBridge(options:BridgeOptions){
  addEventListener('focus',focus);open();
  return{sync,dispose(){stopped=true;syncGeneration++;clearTimeout(timer);port?.disconnect();removeEventListener('focus',focus);}};
 }
-// Call bridge.sync() on Supabase TOKEN_REFRESHED, SIGNED_IN and SIGNED_OUT.
+// Call bridge.sync() on Supabase TOKEN_REFRESHED, SIGNED_IN, SIGNED_OUT and confirmed account goal saves.
 // The getAccessToken callback must read the current app session each time.

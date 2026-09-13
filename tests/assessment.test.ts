@@ -22,6 +22,41 @@ test('role aliases match explicit evidence, while CEO assistants and vice presid
     assert.equal(result.criteria[0].status === 'supported', false); assert.equal(result.contactRoutes.some(c => c.kind === 'executive_hiring'), false);
   }
 });
+test('aspirational headlines do not create executive or peer routes, while an explicit rendered role does', () => {
+  const g = goal([criterion({terms: ['CEO']})]);
+  const sourceUrl = 'https://linkedin.com/in/synthetic-person#experience';
+  const aspirant = {name: 'Synthetic aspirant', anchors: [{kind: 'headline', text: 'Exploring CEO roles', sourceUrl}]};
+  const result = assessCandidate(g, aspirant);
+  assert.equal(result.criteria[0].status, 'unknown'); assert.deepEqual(result.contactRoutes, []);
+  assert.equal(result.isMatch, false); assert.deepEqual(rankGoalNetwork(g, [aspirant]), []);
+  const explicit = buildCandidateEvidence({name: 'Synthetic executive', anchors: [
+    {kind: 'headline', text: 'Exploring new projects'},
+    {kind: 'experience', field: 'role', text: 'Chief Executive Officer', sourceUrl},
+  ]});
+  const supported = assessCandidate(g, explicit);
+  const role = explicit.claims.find(item => item.field === 'role')!;
+  assert.equal(supported.criteria[0].status, 'supported');
+  assert.deepEqual(supported.contactRoutes.map(route => route.kind), ['peer', 'executive_hiring']);
+  assert.ok(supported.contactRoutes.every(route => route.claimIds.includes(role.id)));
+  assert.equal(role.sourceRef, sourceUrl);
+});
+test('typed profile roles remain contact evidence and residence does not establish an opportunity location', () => {
+  const g = goal([criterion({terms: ['CEO'], appliesTo: 'opportunity'}),
+    criterion({id: 'geo', field: 'location', label: 'Boston opportunity', terms: ['Boston'], appliesTo: 'opportunity'})]);
+  const result = assessCandidate(g, {name: 'Synthetic executive', anchors: [
+    {kind: 'experience', field: 'role', text: 'CEO'},
+    {kind: 'location', text: 'Boston'},
+  ]});
+  assert.ok(result.criteria.every(item => item.status === 'unknown'));
+  assert.ok(result.contactRoutes.some(route => route.kind === 'executive_hiring'));
+  const observedOpportunity = assessCandidate(g, {name: 'Synthetic executive', anchors: [
+    {kind: 'experience', field: 'role', text: 'CEO'},
+    {kind: 'location', text: 'Chicago'},
+    {kind: 'opportunity', field: 'location', appliesTo: 'opportunity', text: 'Boston'},
+  ]});
+  assert.equal(observedOpportunity.criteria[0].status, 'unknown');
+  assert.equal(observedOpportunity.criteria[1].status, 'supported');
+});
 test('company names never manufacture FMCG evidence; an explicit sector alias does', () => {
   assert.equal(assessCandidate(industryGoal(), {name: 'Sam', company: 'Unilever'}).criteria[0].status, 'unknown');
   const explicit = assessCandidate(industryGoal(), {name: 'Sam', industry: 'Fast-moving consumer goods'});

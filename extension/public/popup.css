@@ -104,3 +104,15 @@ button:hover:not(:disabled) { background: #EFEDFD; border-color: #D9D4F9; color:
 #save:hover:not(:disabled) { background: var(--indigo); border-color: var(--indigo); }
 button:disabled { opacity: .42; cursor: not-allowed; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+
+.account-goals > .hint { margin-bottom: 12px; }
+.goal-fit > summary { cursor: pointer; font-size: 14px; font-weight: 700; line-height: 1.45; overflow-wrap: anywhere; }
+.goal-version { margin-top: 8px; }
+.goal-fit .reason { margin-top: 10px; }
+.goal-fit h3 { font-size: 12px; margin: 15px 0 6px; }
+.goal-unknowns { margin: 0; padding-left: 18px; font-size: 12px; line-height: 1.6; color: var(--body); }
+.goal-unknowns li + li { margin-top: 6px; }
+.assessment-sources { margin-top: 14px; font-size: 12px; }
+.assessment-sources summary { cursor: pointer; color: var(--indigo); }
+.assessment-sources > div { margin-top: 10px; padding-top: 10px; border-top: 1px solid #E4E0F7; }
+.assessment-sources a { font-size: 11px; }

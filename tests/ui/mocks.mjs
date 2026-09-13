@@ -90,6 +90,6 @@ export const appDependencyStubs = {
     export const prepareDeviceHandoff=(...args)=>state().prepareHandoff(...args);
     export const copyDeviceHandoff=(...args)=>state().copyHandoff(...args);
   `,
-  './lib/extension-bridge': 'export const startExtensionBridge = () => ({dispose() {}, sync() {}});',
+  './lib/extension-bridge': `${state} export const startExtensionBridge = options => {state().extensionBridgeOptions=options;return {dispose() {}, async sync() {await state().extensionSync?.();}};};`,
   'pdfjs-dist/legacy/build/pdf.worker.min.mjs?url': 'export default "unused-test-worker";',
 };

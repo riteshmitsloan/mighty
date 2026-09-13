@@ -1,2 +1,2 @@
 import{spawnSync}from'node:child_process';import{resolve}from'node:path';import{deps}from'./dependencies.mjs';
-const r=spawnSync(process.execPath,['--import',resolve(deps,'node_modules/tsx/dist/loader.mjs'),'--test','tests/prototype.test.ts'],{stdio:'inherit',env:{...process.env,MIGHTY_DEPS_ROOT:deps}});process.exit(r.status??1);
+const r=spawnSync(process.execPath,['--import',resolve(deps,'node_modules/tsx/dist/loader.mjs'),'--test','tests/prototype.test.ts','tests/goals.test.ts','tests/worker.test.ts'],{stdio:'inherit',env:{...process.env,MIGHTY_DEPS_ROOT:deps}});process.exit(r.status??1);

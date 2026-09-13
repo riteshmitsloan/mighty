@@ -20,6 +20,7 @@ import GoalSwitcher from './components/GoalSwitcher';
 import PersonEvidencePanel from './components/PersonEvidencePanel';
 import DeviceGoalsPanel from './components/DeviceGoalsPanel';
 import {useGoals} from './lib/use-goals';
+import type {Goal} from './lib/goals';
 import {buildSelfEvidence} from './lib/evidence';
 import {completeRelationshipCommitment,openGoalCommitments} from './lib/relationship-events';
 import {copyDeviceHandoff,type HandoffPreview} from './lib/owner-handoff';
@@ -46,6 +47,7 @@ export default function App(){
  const [exploreMode,setExploreMode]=useState<'explore'|'ask'>('explore');
  const [exploreFocus,setExploreFocus]=useState(0);
  const mailboxWorker=useRef<Worker|null>(null);
+ const extensionBridge=useRef<ReturnType<typeof startExtensionBridge>|null>(null);
  const key=uid||'device-draft';
  const goals=useGoals(key,uid,ready&&loadedSourcesKey===key,strategy);
  const activeStrategy=goals.activeGoal?.outcome||strategy;
@@ -98,7 +100,12 @@ export default function App(){
   return()=>{active=false;};
  },[key,uid,ready,refresh,renderGeneration]);
  useEffect(()=>{if(!uid)return;return watchInbox(result=>{if(!isCurrent())return;if(result.saved){void refresh().catch(e=>{if(isCurrent())setNotice(message(e));});setNotice(`${result.saved} ${result.saved===1?'person':'people'} received from your extension.`);}if(result.failed)setNotice(`${result.failed} extension saves are still pending and will retry on focus.`);},e=>{if(isCurrent())setNotice(e.message);},uid);},[uid,refresh]);
- useEffect(()=>{if(!/^[a-p]{32}$/.test(extensionId))return;const bridge=startExtensionBridge({extensionId,getAccessToken:async()=>((await db?.auth.getSession())?.data.session?.access_token||null),onStatus:(status:any)=>setExtensionStatus(status?.connected?'Connected to your account':status?.message||'Account session needed')});const subscription=db?.auth.onAuthStateChange(()=>void bridge.sync());return()=>{bridge.dispose();subscription?.data.subscription.unsubscribe();};},[extensionId]);
+ useEffect(()=>{if(!/^[a-p]{32}$/.test(extensionId))return;const bridge=startExtensionBridge({extensionId,getAccessToken:async()=>((await db?.auth.getSession())?.data.session?.access_token||null),onStatus:(status:any)=>setExtensionStatus(status?.connected?'Connected to your account':status?.message||'Account session needed')});extensionBridge.current=bridge;const subscription=db?.auth.onAuthStateChange(()=>void bridge.sync());return()=>{if(extensionBridge.current===bridge)extensionBridge.current=null;bridge.dispose();subscription?.data.subscription.unsubscribe();};},[extensionId]);
+ const saveGoalAndRefreshExtension=async(goal:Goal)=>{
+  await goals.save(goal);
+  // The companion reads committed account goals. Local drafts never masquerade as cloud saves.
+  if(uid&&isCurrent())await extensionBridge.current?.sync();
+ };
  const run=async(name:string,work:()=>Promise<void>)=>{
   if(actionLock.current||!isCurrent())return;actionLock.current=true;setBusy(name);setProgress('');setNotice('');
   try{await work();}catch(e){if(isCurrent())setNotice(message(e));}
@@ -212,7 +219,7 @@ export default function App(){
     </>}
     {page === 'Relationships' && <RelationshipViews key={key} goals={goals.workspace.goals} onComplete={completeReminder} people={people} events={events} strategy={activeStrategy} view={relationshipView} onView={setRelationshipView} busy={Boolean(busy)} onOpen={selectPerson} onAdd={() => setModal(true)} onExplore={openExplore} onStage={updateStage}/>}
     {page === 'Explore' && <><header className="page-heading"><p className="eyebrow">Explore</p><h1>{exploreMode === 'ask' ? 'What’s on your mind?' : 'Who should I know?'}</h1></header><DiscoverPanel key={key} goal={goals.activeGoal} selfEvidence={selfEvidence} all={connections} strategy={activeStrategy} employers={employers} savedUrls={savedUrls} call={gatewayForAccount(uid)} onSave={newPerson} onRemaining={value => {if (isCurrent()) setRemaining(value);}} focusRequest={exploreFocus} mode={exploreMode}/></>}
-    {page === 'Me' && <MePanel goalsPanel={<>{uid&&<DeviceGoalsPanel key={uid} uid={uid} busy={goals.busy} onCopied={()=>goals.adoptCopiedWorkspace()}/>}{goals.conflicts.map(conflict=><section key={conflict.goalId} className="panel content-panel"><h2>Two versions of {conflict.local.title}</h2><p>Your version: {conflict.local.outcome}</p><p>Account version: {conflict.remote.outcome}</p><div className="row-actions"><button className="button secondary" onClick={()=>void goals.resolve(conflict.goalId,'local')}>Keep my version</button><button className="button secondary" onClick={()=>void goals.resolve(conflict.goalId,'remote')}>Use account version</button></div></section>)}<GoalsPanel key={key} draftKey={key} {...goals.workspace} onSelect={goals.select} onSave={goals.save} notice={goals.notice} busy={goals.busy}/></>} key={key} tab={meTab} onTab={setMeTab} sources={sources} people={people} connectionCount={connections.length} strategy={strategy} onStrategy={editStrategy} onSaveStrategy={saveStrategy} onExplore={openExplore} devicePanel={uid?<DeviceSourcesPanel key={uid} uid={uid} busy={Boolean(busy)} onCopy={useDeviceSources}/>:null} accountPanel={<AccountPanel client={db} uid={uid} email={accountEmail} busy={Boolean(busy)} ready={ready}/>} uid={uid} busy={Boolean(busy)} ownEmail={ownEmail} onOwnEmail={setOwnEmail} onArchive={importArchive} onResume={importResume} onMailbox={importMailbox} onRebuild={rebuildArchive} onSync={syncSources} extensionId={extensionId} extensionStatus={extensionStatus} onExtensionId={value => {setExtensionId(value); localStorage.setItem('mighty-extension-id', value);}}/>}
+    {page === 'Me' && <MePanel goalsPanel={<>{uid&&<DeviceGoalsPanel key={uid} uid={uid} busy={goals.busy} onCopied={()=>goals.adoptCopiedWorkspace()}/>}{goals.conflicts.map(conflict=><section key={conflict.goalId} className="panel content-panel"><h2>Two versions of {conflict.local.title}</h2><p>Your version: {conflict.local.outcome}</p><p>Account version: {conflict.remote.outcome}</p><div className="row-actions"><button className="button secondary" onClick={()=>void goals.resolve(conflict.goalId,'local')}>Keep my version</button><button className="button secondary" onClick={()=>void goals.resolve(conflict.goalId,'remote')}>Use account version</button></div></section>)}<GoalsPanel key={key} draftKey={key} {...goals.workspace} onSelect={goals.select} onSave={saveGoalAndRefreshExtension} notice={goals.notice} busy={goals.busy}/></>} key={key} tab={meTab} onTab={setMeTab} sources={sources} people={people} connectionCount={connections.length} strategy={strategy} onStrategy={editStrategy} onSaveStrategy={saveStrategy} onExplore={openExplore} devicePanel={uid?<DeviceSourcesPanel key={uid} uid={uid} busy={Boolean(busy)} onCopy={useDeviceSources}/>:null} accountPanel={<AccountPanel client={db} uid={uid} email={accountEmail} busy={Boolean(busy)} ready={ready}/>} uid={uid} busy={Boolean(busy)} ownEmail={ownEmail} onOwnEmail={setOwnEmail} onArchive={importArchive} onResume={importResume} onMailbox={importMailbox} onRebuild={rebuildArchive} onSync={syncSources} extensionId={extensionId} extensionStatus={extensionStatus} onExtensionId={value => {setExtensionId(value); localStorage.setItem('mighty-extension-id', value);}}/>}
     {page === 'Person' && (selectedPerson ? <>
      <button className="back-link" onClick={() => setPage('Relationships')}><ArrowLeft size={15}/>Relationships</button>
      <header className="person-heading"><Avatar name={selectedPerson.person} size="large" tone={3}/><div><h1>{selectedPerson.person}</h1>{personHeadline(selectedPerson) && <p>{personHeadline(selectedPerson)}</p>}</div><StagePill stage={selectedPerson.stage}/></header>

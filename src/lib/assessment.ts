@@ -1,6 +1,5 @@
 import type {Goal, GoalCriterion} from './goals';
-import type {CompanyOverlap} from './archive';
-import {companyKey, companyOverlapFor} from './archive';
+import {companyKey, companyOverlapFor, type CompanyOverlap} from './company-evidence';
 import {buildCandidateEvidence, candidateKey, distinctEvidenceClaims, evidenceKey, sortedEvidence, type CandidateInput, type CandidateEvidence, type EvidenceClaim, type EvidenceField} from './evidence';
 import {cleanText, deepFreeze} from './text';
 

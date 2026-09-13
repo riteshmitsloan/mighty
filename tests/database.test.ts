@@ -1,4 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import {PGlite} from '@electric-sql/pglite';import {fileURLToPath} from 'node:url';
+import {buildSavedPersonEvidence} from '../src/lib/person-evidence';
+import {readRelationshipData} from '../src/lib/data-access';
+import {MemoryServer} from './fake-client';
 const MIGRATIONS_ROOT=process.env.MIGRATIONS_ROOT ?? fileURLToPath(new URL('../supabase/migrations/',import.meta.url));
 const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222',P='33333333-3333-4333-8333-333333333333';
 test('all migrations apply and database security/budgets enforce the brief',async t=>{
@@ -78,6 +81,25 @@ async function moduleAssertions(db: PGlite, t: import('node:test').TestContext) 
   await db.query(`insert into public.outreach_inbox(id,user_id,operation_id,profile_url,person,snapshot,profile_read_at) values($1,$2,$3,$4,'Module Person',$5::jsonb,$6)`,[id,A,crypto.randomUUID(),url,JSON.stringify(snapshot),observedAt]);return id;
  }
  async function consume(id:string){return (await db.query<any>('select public.consume_inbox($1) as id',[id])).rows[0].id as string;}
+ await t.test('current extension snapshot stays complete through inbox SQL, account reading and person assessment',async()=>{
+  await asUser(A,async()=>{
+   const url='https://www.linkedin.com/in/current-contract-fixture/',at='2026-09-12T13:00:00Z';
+   const snapshot={name:'Module Person',profileUrl:url,profileReadAt:at,truncated:false,truncationReasons:[],anchors:[
+    {kind:'headline',text:'Exploring AI leadership roles',sourceUrl:url,observedAt:at},
+    {kind:'about',text:'Led an explicitly recorded product programme.',sourceUrl:url,observedAt:at},
+    {kind:'education',text:'Fixture University',sourceUrl:url,observedAt:at},
+    {kind:'timing',text:'Recent activity: September 2026',sourceUrl:url,observedAt:at}]};
+   const inbox=await enqueue(snapshot,at,url),relationship=await consume(inbox);
+   const people=(await db.query<any>('select * from public.outreach_log where id=$1',[relationship])).rows;
+   const reads=(await db.query<any>('select * from public.profile_reads where relationship_id=$1',[relationship])).rows;
+   const server=new MemoryServer({outreach_log:people,profile_reads:reads});server.actor=A;
+   const loaded=(await readRelationshipData(server.client,A)).people[0];
+   assert.deepEqual(loaded.profile,snapshot);
+   const evidence=buildSavedPersonEvidence(loaded);
+   assert.equal(evidence.completeProfile,true);assert.equal(evidence.profileReadAt,at);
+   assert.deepEqual(evidence.claims.filter(c=>c.sourceKind==='profile').map(c=>c.text),snapshot.anchors.map(a=>a.text));
+  });
+ });
  await t.test('inbox consumption is idempotent and incomplete search saves create no fake profile read',async()=>{
   await asUser(A,async()=>{
    searchInbox=await enqueue(search,null);rid=await consume(searchInbox);

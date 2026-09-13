@@ -7,9 +7,16 @@ const {build} = requireDeps('esbuild');
 const {parseHTML} = requireDeps('linkedom');
 const {outputFiles} = await build({entryPoints: [fileURLToPath(new URL('../src/popup.ts', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'node'});
 const script = Buffer.from(outputFiles[0].text).toString('base64');
+const {outputFiles: contextFiles} = await build({entryPoints: [fileURLToPath(new URL('../src/goal-context.ts', import.meta.url))], bundle: true, write: false, format: 'esm', platform: 'node'});
+const {accountGoalContext} = await import('data:text/javascript;base64,' + Buffer.from(contextFiles[0].text).toString('base64'));
 const html = await readFile(new URL('../public/popup.html', import.meta.url), 'utf8');
 const owner = '11111111-1111-4111-a111-111111111111';
 const base = 'https://www.linkedin.com/in/';
+const other = '22222222-2222-4222-a222-222222222222';
+const goal = (id, kind, title, criteria) => ({id, kind, title, outcome: title, criteria, openQuestions: [], status: 'active', version: 1, createdAt: '2026-09-12T12:00:00Z', updatedAt: '2026-09-12T12:00:00Z'});
+const career = goal('33333333-3333-4333-a333-333333333333', 'career', 'Healthcare career', [{id: 'health',field: 'custom',label:'Healthcare experience',terms:['healthcare'],importance:'required',appliesTo:'contact',origin:'user'}]);
+const fundraising = goal('44444444-4444-4444-a444-444444444444', 'fundraising', 'Seed fundraising', [{id: 'stage',field:'stage',label:'Seed funding',terms:['seed'],importance:'required',appliesTo:'opportunity',origin:'user'}]);
+const context = (goals = [career, fundraising], uid = owner) => accountGoalContext(uid, goals.map(document => ({id:document.id,user_id:uid,version:document.version,document})));
 let serial = 0;
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const search = () => ({kind: 'search', state: 'ready', message: '', pageUrl: 'https://www.linkedin.com/search/results/people/?keywords=healthcare', results: Array.from({length: 7}, (_, index) => ({profileUrl: `${base}person-${index}/`, name: `Person ${index}`, subtitle: 'Healthcare', profileReadAt: null, truncated: false}))});
@@ -28,14 +35,19 @@ async function open(snapshot, options = {}) {
   const messages = [], callbacks = [], saves = [];
   let closed = false;
   window.close = () => {closed = true;};
-  const handle = {snapshot, fail: options.fail || null, connected: options.connected ?? true, saves, document: window.document, window, closed: () => closed};
+  const handle = {snapshot, messages, userId: owner, goalContext: options.goalContext ?? context(), saveWait: null, statusWait: null, statusFailure: false, fail: options.fail || null, connected: options.connected ?? true, saves, document: window.document, window, closed: () => closed};
   globalThis.chrome = {runtime: {
     async sendMessage(message) {
       messages.push(message);
-      if (message.type === 'mighty:status') return {ok: true, connected: handle.connected, userId: owner, strategy: 'Healthcare leaders', appOrigin: 'http://127.0.0.1:5173'};
+      if (message.type === 'mighty:status') {
+        const response = {ok: true, connected: handle.connected, userId: handle.connected ? handle.userId : null, goalContext: handle.connected ? handle.goalContext : null, appOrigin: 'http://127.0.0.1:5173'};
+        const failure = handle.statusFailure; if (handle.statusWait) await handle.statusWait;
+        if (failure) throw Error('Old refresh failed.'); return response;
+      }
       if (message.type === 'mighty:read_active') return {ok: true, snapshot: handle.snapshot};
       if (message.type === 'mighty:save') {
         saves.push(structuredClone(message.save));
+        if (handle.saveWait) await handle.saveWait;
         return handle.fail?.(message.save) ? {ok: false, message: 'The save is still pending.'} : {ok: true};
       }
       throw Error('Unexpected message');
@@ -44,7 +56,7 @@ async function open(snapshot, options = {}) {
   }};
   await import(`data:text/javascript;base64,${script}#${++serial}`);
   await tick();
-  handle.refresh = async () => {for (const callback of callbacks) callback({type: 'mighty:page_changed'}); await tick();};
+  handle.refresh = async (type = 'mighty:page_changed') => {for (const callback of callbacks) callback({type}); await tick();};
   handle.clickSave = async () => {window.document.querySelector('#save').click(); await tick();};
   return handle;
 }
@@ -89,9 +101,13 @@ await test('profile groups preserve every fact, explanation precedes fit, save p
   assert.match(h.document.body.textContent, /Role two: full factual text\./);
   assert.match(h.document.body.textContent, /END_SENTINEL/);
   const fit = h.document.querySelector('.goal-fit');
-  assert.equal(fit.children[0].className, 'reason');
-  assert.equal(fit.children[1].className, 'fit-label');
-  assert.match(fit.children[0].textContent, /…”$/);
+  assert.equal(fit.querySelector('summary').textContent, career.title);
+  const children = [...fit.children];
+  assert.ok(children.indexOf(fit.querySelector('.reason')) < children.indexOf(fit.querySelector('.fit-label')));
+  assert.match(fit.querySelector('.reason').textContent, /Healthcare experience/);
+  assert.equal(h.document.querySelectorAll('.goal-fit').length, 2);
+  assert.match(h.document.querySelectorAll('.goal-fit')[1].textContent, /Still unknown/);
+  assert.doesNotMatch(h.document.body.textContent, /probability|percentile|\d+%/i);
   assert.match(h.document.body.textContent, /Activity date: Sep 10, 2026/);
   await h.clickSave();
   assert.deepEqual(h.saves[0].profile, p);
@@ -110,4 +126,68 @@ await test('disconnected account cannot save and Skip only closes the popup', as
   h.document.querySelector('#skip').click();
   assert.equal(h.closed(), true);
   assert.equal(h.saves.length, 0);
+});
+await test('goal version refresh changes its result and preserves full supporting source text', async () => {
+  const h = await open({kind:'profile',state:'ready',profile:profile(),message:''});
+  assert.match(h.document.querySelector('.goal-fit .fit-label').textContent, /supports/);
+  assert.match(h.document.querySelector('.assessment-sources').textContent, /END_SENTINEL/);
+  h.goalContext = context([{...career,version:2,criteria:[{...career.criteria[0],terms:['aerospace']}]}]);
+  await h.refresh('mighty:account_changed');
+  assert.equal(h.document.querySelector('.goal-fit').dataset.goalVersion,'2');
+  assert.match(h.document.querySelector('.goal-fit .fit-label').textContent,/More evidence/);
+  assert.equal(h.document.querySelector('.assessment-sources'),null);
+});
+await test('empty saved goals show the account-save instruction and never score search snippets', async () => {
+  const h = await open({kind:'profile',state:'ready',profile:profile(),message:''},{goalContext:context([])});
+  assert.equal(h.document.querySelector('.goal-fit'),null);
+  assert.match(h.document.body.textContent,/Save goal to account/);
+  h.snapshot = search(); await h.refresh();
+  assert.equal(h.document.querySelector('.goal-fit'),null);
+  assert.equal(h.document.querySelectorAll('.result').length,7);
+});
+await test('account change during an in-flight save clears old goals immediately and refreshes after completion', async () => {
+  const h = await open({kind:'profile',state:'ready',profile:profile(),message:''});
+  let releaseOldStatus;h.statusWait = new Promise(resolve=>{releaseOldStatus=resolve;});
+  await h.refresh(); h.statusWait = null;
+  let release;h.saveWait = new Promise(resolve=>{release=resolve;});
+  h.document.querySelector('#save').click();await tick();assert.equal(h.saves[0].userId,owner);
+  h.userId=other;h.goalContext=context([{...fundraising,title:'Second account only'}],other);
+  await h.refresh('mighty:account_changed');
+  assert.equal(h.document.querySelector('.goal-fit'),null);
+  assert.doesNotMatch(h.document.body.textContent,/Healthcare career/);
+  releaseOldStatus();await tick();assert.equal(h.document.querySelector('.goal-fit'),null);
+  release();await tick();await tick();
+  assert.equal(h.saves[0].userId,owner);
+  assert.match(h.document.querySelector('.goal-fit').textContent,/Second account only/);
+  assert.doesNotMatch(h.document.querySelector('#notice').textContent,/Saved|Saving/);
+  assert.doesNotMatch(h.document.body.textContent,/Healthcare career/);
+});
+await test('an old failed refresh cannot erase a newly connected account view', async () => {
+  const h = await open({kind:'profile',state:'ready',profile:profile(),message:''});
+  let release;h.statusWait=new Promise(resolve=>{release=resolve;});h.statusFailure=true;
+  await h.refresh();
+  h.statusWait=null;h.statusFailure=false;h.userId=other;h.goalContext=context([{...fundraising,title:'New owner goal'}],other);
+  await h.refresh('mighty:account_changed');
+  assert.match(h.document.querySelector('.goal-fit').textContent,/New owner goal/);
+  release();await tick();
+  assert.match(h.document.querySelector('.goal-fit').textContent,/New owner goal/);
+  assert.doesNotMatch(h.document.querySelector('#notice').textContent,/Old refresh failed/);
+});
+await test('focus while saving performs its deferred account-goal refresh after save', async () => {
+  const h = await open({kind:'profile',state:'ready',profile:profile(),message:''});
+  let release;h.saveWait=new Promise(resolve=>{release=resolve;});h.document.querySelector('#save').click();await tick();
+  const before=h.messages.filter(message=>message.type==='mighty:status'&&message.refreshGoals).length;
+  h.window.dispatchEvent(new h.window.Event('focus'));await tick();
+  assert.equal(h.messages.filter(message=>message.type==='mighty:status'&&message.refreshGoals).length,before);
+  release();await tick();await tick();
+  assert.equal(h.messages.filter(message=>message.type==='mighty:status'&&message.refreshGoals).length,before+1);
+});
+await test('successful reconnection clears the previous refresh failure notice', async () => {
+  const h = await open({kind:'profile',state:'ready',profile:profile(),message:''});
+  h.statusFailure=true;await h.refresh();
+  assert.match(h.document.querySelector('#notice').textContent,/Old refresh failed/);
+  assert.equal(h.document.querySelector('.goal-fit'),null);
+  h.statusFailure=false;await h.refresh();
+  assert.ok(h.document.querySelector('.goal-fit'));
+  assert.doesNotMatch(h.document.querySelector('#notice').textContent,/Old refresh failed/);
 });
