@@ -10,11 +10,17 @@ Mighty supports intentional professional networking: choose a goal, inspect the 
 - Team: Ritesh Mohan Srivastava and Jayati Kambhampati.
 - This document records progress and a demo agenda. Updating it sends no submission or email.
 
+## Private login ID and password
+
+Private accounts now support direct login ID/password sign-in alongside existing email links. Login IDs use reserved internal identifiers and do not receive email or recovery links. No signup is added, passwords are never placed in application storage, and generic failure copy avoids revealing account state. Five new password-domain checks, all 126 UI checks, strict TypeScript and production packaging pass.
+
+Jayati's account creation is pending explicit confirmation of its internal identifier after automatic approval review rejected the create action. No account was created, no credential was sent, and no successful live password login is claimed yet.
+
 ## Final reader and role repair: 0.3.3
 
 The second observed layout has no employer link. Its current role and company are recognized only when the rendered company-logo label, job-entry hierarchy and valid current date agree. VP/Vice President, dotted V.P., SVP/EVP and CAIO aliases now establish possible career contact routes while preserving unknown openings, negative role statements and assistant/advisor exclusions. No fundraising mandate is inferred from a job title.
 
-415 release core, 120 UI and 177 extension checks pass. The 24 unrelated uncommitted Tavily checks are excluded. The native connected top-right panel, photo and Save-to-app acceptance below passed on 0.3.1. Final 0.3.3 typed-reader acceptance awaits Reload and is not inferred from those older checks.
+415 release core, 120 UI and 177 extension checks pass. The 24 unrelated uncommitted Tavily checks are excluded. The native connected top-right panel, photo and Save-to-app acceptance below passed on 0.3.1. After Reload, native Chrome showed Possible fit for an actual current V.P. R&D entry with a career-contact reason; no vacancy was asserted. A later report of profile-to-profile navigation failure is being investigated separately.
 
 ## Native extension follow-up: 0.3.2
 
