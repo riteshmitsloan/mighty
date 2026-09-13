@@ -57,6 +57,18 @@ function recentActivityDate(item:Element,now:string):string|null{
  }
  return null;
 }
+function profileToolbarSummary(doc:Document,name:string,profileUrl:string):Element[]|null{
+ // The toolbar is a rendered profile summary, not the browser's canonical URL
+ // metadata. It must independently show this exact URL and the same subject name.
+ const summaries=Array.from(doc.querySelectorAll('[role="toolbar"] a[href]')).filter(rendered).filter(link=>
+  canonicalProfileURL(link.getAttribute('href')||'',profileUrl)&&Array.from(link.querySelectorAll('p')).some(rendered));
+ if(summaries.length!==1)return null;
+ const summary=summaries[0],paragraphs=Array.from(summary.querySelectorAll('p')).filter(rendered);
+ try{if(new URL(summary.getAttribute('href')||'',profileUrl).href!==profileUrl)return null;}catch{return null;}
+ if(paragraphs.length<1||paragraphs.length>2||paragraphs.some(p=>p.closest('a')!==summary)
+  ||textOf(paragraphs[0],Infinity).normalize('NFKC')!==name.normalize('NFKC'))return null;
+ return paragraphs;
+}
 /** The observed markerless layout has a Contact info identity in the same card
  * and an independently URL-bound toolbar name. Agreement rejects partial SPA swaps. */
 function markerlessSubject(card:Element,scope:Element,profileUrl:string):{heading:Element;top:Element;scope:Element;card:Element}|null{
@@ -70,16 +82,20 @@ function markerlessSubject(card:Element,scope:Element,profileUrl:string):{headin
  });
  if(contacts.length!==1||contacts[0].closest('section')!==top||!/^contact info$/i.test(textOf(contacts[0],Infinity)))return null;
  try{if(new URL(contacts[0].getAttribute('href')||'',profileUrl).href!==profileUrl+'overlay/contact-info/')return null;}catch{return null;}
- // The toolbar is a rendered profile summary, not the browser's canonical URL
- // metadata. It must independently show this exact URL and the same subject name.
- const summaries=Array.from(card.ownerDocument.querySelectorAll('[role="toolbar"] a[href]')).filter(rendered).filter(link=>
-  canonicalProfileURL(link.getAttribute('href')||'',profileUrl)&&Array.from(link.querySelectorAll('p')).some(rendered));
- if(summaries.length!==1)return null;
- const summary=summaries[0],paragraphs=Array.from(summary.querySelectorAll('p')).filter(rendered);
- try{if(new URL(summary.getAttribute('href')||'',profileUrl).href!==profileUrl)return null;}catch{return null;}
- if(paragraphs.length<1||paragraphs.length>2||paragraphs.some(p=>p.closest('a')!==summary)
-  ||textOf(paragraphs[0],Infinity).normalize('NFKC')!==name.normalize('NFKC'))return null;
+ if(!profileToolbarSummary(card.ownerDocument,name,profileUrl))return null;
  return{heading,top,scope,card};
+}
+/** The SDUI summary's second paragraph is the headline, not a typed role. It
+ * must also occur in this verified subject's name section, so a stale toolbar
+ * cannot relabel another paragraph or import a recommendation's headline. */
+function sduiHeadline(top:Element,name:string,profileUrl:string):string{
+ const paragraphs=profileToolbarSummary(top.ownerDocument,name,profileUrl);
+ if(paragraphs?.length!==2)return '';
+ const headline=textOf(paragraphs[1],Infinity);
+ if(!headline||headline===name)return '';
+ const matches=Array.from(top.querySelectorAll('p')).filter(p=>rendered(p)&&p.closest('section')===top
+  &&!p.closest('a')&&textOf(p,Infinity)===headline);
+ return matches.length===1?headline:'';
 }
 /** SDUI has no h1. A generic h2 is insufficient: bind the subject through its
  * verification marker, or the narrowly observed Contact info + toolbar layout. */
@@ -165,7 +181,8 @@ export function readProfile(doc:Document,url:string,now=new Date().toISOString()
  const anchors:Anchor[]=[],seen=new Set<string>();
  // Preserve complete rendered evidence. Storage limits reject a whole save, never trim its facts.
  const add=(kind:AnchorKind,text:string,fragment:string,typed?:Pick<Anchor,'field'|'currentExperience'>)=>{text=text.replace(/\s+/g,' ').trim();const key=kind+'\0'+(typed?.field||'')+'\0'+text+'\0'+(typed?.currentExperience?.entryText||'');if(text&&text!==name&&!seen.has(key)){seen.add(key);anchors.push({kind,text,sourceUrl:profileUrl+'#'+fragment,observedAt:now,...typed});}};
- add('headline',textOf(firstRendered(top,'[data-field="headline"],.text-body-medium.break-words,.pv-text-details__left-panel .text-body-medium'),Infinity),'profile');
+ const explicitHeadline=textOf(firstRendered(top,'[data-field="headline"],.text-body-medium.break-words,.pv-text-details__left-panel .text-body-medium'),Infinity);
+ add('headline',explicitHeadline||(!classic?sduiHeadline(top,name,profileUrl):''),'profile');
  add('location',textOf(firstRendered(top,'[data-field="location"],.text-body-small.inline.t-black--light.break-words,.pv-text-details__left-panel .text-body-small'),Infinity),'profile');
  for(const[kind,label,ids]of sections){
   let section:Element|null=null;for(const id of ids){const exact=scope.querySelector('[id="'+id+'"]');if(exact){section=exact.closest('section');if(section)break;}}

@@ -31,7 +31,8 @@ test('the observed markerless top card reads its unique URL-bound name and enabl
   assert.equal(profilePanelEligibility(document,url),'other'); assert.equal(snapshot(document,url).state,'ready');
   assert.ok(profile.anchors.some(anchor=>anchor.kind==='about'&&anchor.text.includes('Synthetic professional experience')));
   assert.doesNotThrow(()=>save(profile));
-  assert.ok(!profile.anchors.some(anchor=>anchor.kind==='headline'||anchor.kind==='location'||anchor.field!==undefined), 'Unlabelled paragraphs are not invented typed fields.');
+  assert.equal(profile.anchors.find(anchor=>anchor.kind==='headline')?.text,'Investor at Example Organization');
+  assert.ok(!profile.anchors.some(anchor=>anchor.kind==='location'||anchor.field!==undefined), 'The corroborated headline stays context; unlabelled paragraphs are not invented typed fields.');
 });
 
 test('a markerless name-only profile mounts read-only UI without becoming complete or saveable', () => {

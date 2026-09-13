@@ -10,6 +10,22 @@ Mighty supports intentional professional networking: choose a goal, inspect the 
 - Team: Ritesh Mohan Srivastava and Jayati Kambhampati.
 - This document records progress and a demo agenda. Updating it sends no submission or email.
 
+## Open on the best-fitting goal: 0.3.10
+
+The automatic profile panel now selects Strong potential before Possible fit, keeping saved goal order for ties or when no goal has a relevant fit. Raw ranking values are not compared across goals. A deliberate pill selection remains selected while the same profile loads more evidence; moving to a different profile restores automatic selection. This changes only the displayed goal, not saved goals, account state or scoring evidence.
+
+Validation: all 249 extension checks, strict TypeScript and production packaging pass. The unchanged app retains the prior 482 core and 146 UI results. All 19 installed files match ZIP SHA256 70bb8a90fc5166383af2d7e101bb58c3a26187dce4f675943a66d66646fb2ec7. Native 0.3.10 default-selection acceptance awaits Reload.
+
+Native 0.3.9 comparison confirmed independent results: Richard Fearn had Possible fit for funding and No clear connection yet for career; Jason Gerding had Strong potential for career and No clear connection yet for funding after Experience loaded. Both had one connected panel with the correct name. Richard's photo appeared; Jason used initials. No save, model call or outreach was performed.
+
+## SDUI headline recovery: 0.3.9
+
+The owner reloaded 0.3.8 and confirmed that Richard Fearn's panel appeared. Native feedback exposed a second, separate omission: the visible investor headline was absent from the assessment because that layout uses an unlabelled paragraph. The markerless test had explicitly expected that paragraph to be ignored; a successful panel mount did not verify input coverage.
+
+Version 0.3.9 recovers the headline only when the independently URL/name-bound toolbar's headline also occurs uniquely in the verified profile's name section. This applies to both supported SDUI identity layouts. The headline remains provisional context, not a typed current role, employer, investor mandate or opportunity claim. A headline can suggest a fundraising conversation without proving that the person will invest. The captured native DOM replays as Possible fit for funding from the exact investor headline and No clear connection yet for the career goal. All 241 extension checks, strict TypeScript and production packaging pass; the unchanged app retains the prior 482 core and 146 UI results. All 19 installed files match ZIP SHA256 5bc126e51f9b2f8c33ca9b8953fe101fc31ec85207d6e0b838cae8c28ec6d9a7. Native 0.3.9 profile and cross-goal acceptance passed as recorded above.
+
+Version 0.3.8 was published as bdb0bb3. Pages run 34778944663 succeeded; the public app, plan and extension ZIP matched the tested bytes. That deployment includes the goal-chat repair. Its native panel appearance is confirmed; headline coverage required the follow-up above.
+
 ## Profile visibility, contact tiers and goal-chat repair: 0.3.8
 
 Native Chrome inspection reproduced a missing panel on a markerless LinkedIn profile. Its unique top card had a valid name and Contact info link but no verification-trigger marker. The new fallback requires agreement between that name, the exact Contact info URL and an independent rendered toolbar name/URL. Conflicting identities, incomplete navigation and self-edit controls still suppress the panel. Ten new regressions cover this layout and its boundaries; layouts without either supported identity path remain unread.

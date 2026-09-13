@@ -57,6 +57,21 @@ test('fit labels require explicit support and never turn missing facts into Low 
  const onlyContext=goal(career.id,'Context',[criterion('First','custom',['CEO']),criterion('Second','custom',['Healthcare'])]);
  assert.notEqual(compactFit(assessCandidate(onlyContext,candidate)).label,'Strong potential');
 });
+test('a manual goal choice survives rereads but a different profile starts with its best fit',async()=>{
+ const h=await harness();try{
+  assert.equal(h.find('.goal-pill[aria-pressed="true"]').textContent,'Career');
+  h.all('.goal-pill')[1].click();h.panel.readPage();
+  assert.equal(h.find('.goal-pill[aria-pressed="true"]').textContent,'Fundraising');
+  h.state.page={kind:'profile',state:'ready',profile:{...profile(),anchors:[...profile().anchors,{kind:'skills',text:'Additional profile context',sourceUrl:profileUrl+'#skills',observedAt:date}]},message:''};
+  h.panel.readPage();assert.equal(h.find('.goal-pill[aria-pressed="true"]').textContent,'Fundraising');
+  h.state.url='https://www.linkedin.com/in/second/';
+  h.state.page={kind:'profile',state:'ready',profile:{...profile(),name:'Second Person',profileUrl:h.state.url,anchors:profile().anchors.map(anchor=>({...anchor,sourceUrl:anchor.sourceUrl.replace(profileUrl,h.state.url)}))},message:''};
+  h.panel.readPage();await tick();
+  assert.equal(h.find('.profile-identity h1').textContent,'Second Person');
+  assert.equal(h.find('.goal-pill[aria-pressed="true"]').textContent,'Career');
+  assert.equal(h.find('.fit-label').textContent,'Possible fit');
+ }finally{h.panel.dispose();}
+});
 test('Save carries the untouched profile once, acknowledges success and prevents duplicate clicks',async()=>{
  const h=await harness();try{
   const pending=deferred<void>();h.state.saveWait=pending.promise;h.find('.save').click();h.find('.save').click();await tick();

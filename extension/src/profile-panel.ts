@@ -172,7 +172,7 @@ export function createProfilePanel(options: ProfilePanelOptions) {
     if (!supportedPanelURL(current)) {host.hidden = true; page = null; pageKey = ''; accountGeneration++; const previous = port; port = undefined; try {previous?.disconnect();} catch {} return;}
     const nextRoute = canonicalProfileURL(current) || current;
     const changed = route !== nextRoute;
-    if (changed) {route = nextRoute; page = null; pageKey = ''; notice = '';}
+    if (changed) {route = nextRoute; page = null; pageKey = ''; notice = ''; selectedGoalId = null;}
     try {
       const next = (options.read || snapshot)(doc, current); const key = contentKey(next);
       if (key !== pageKey) {

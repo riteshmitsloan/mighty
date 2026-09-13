@@ -93,7 +93,12 @@ export function compactProfile(doc: Document, options: CompactProfileOptions): H
     if (!goals.length) {
       section.append(element(doc, 'p', options.goalContext.goals.length ? 'Activate a saved goal in Mighty.' : 'Save a goal to your account in Mighty.', 'hint')); return section;
     }
-    const selected = goals.find(goal => goal.id === options.selectedGoalId) ?? goals[0];
+    const fits = new Map(result.state === 'ready' ? result.assessments.map(row => [row.goal.id, compactFit(row.assessment, row.goal)] as const) : []);
+    // Default to the most relevant goal without comparing raw ranks across goals.
+    // A deliberate selection stays in place while this profile finishes loading.
+    const priority = (goal: Goal) => fits.get(goal.id)?.tone === 'strong' ? 2 : fits.get(goal.id)?.tone === 'possible' ? 1 : 0;
+    const selected = goals.find(goal => goal.id === options.selectedGoalId)
+      ?? goals.reduce((best, goal) => priority(goal) > priority(best) ? goal : best, goals[0]);
     const pills = element(doc, 'div', '', 'goal-pills'); pills.setAttribute('role', 'group'); pills.setAttribute('aria-label', 'Choose a goal');
     for (const goal of goals) {
       const button = element(doc, 'button', goal.title, 'goal-pill'); button.type = 'button'; button.title = goal.title;
@@ -102,8 +107,8 @@ export function compactProfile(doc: Document, options: CompactProfileOptions): H
     }
     section.append(pills);
     const assessment = result.state === 'ready' ? result.assessments.find(row => row.goal.id === selected.id)?.assessment : null;
-    const fit: CompactFit = assessment ? compactFit(assessment, selected) : !hasGoalCriteria(selected) ? missingGoalDetails()
-      : {label: 'Not enough information', tone: 'unknown', reason: result.state === 'unread' ? result.message : 'The saved goal could not be assessed. Try loading it again.'};
+    const fit: CompactFit = fits.get(selected.id) ?? (!hasGoalCriteria(selected) ? missingGoalDetails()
+      : {label: 'Not enough information', tone: 'unknown', reason: result.state === 'unread' ? result.message : 'The saved goal could not be assessed. Try loading it again.'});
     const card = element(doc, 'div', '', 'goal-fit'); card.dataset.goalId = selected.id; card.dataset.goalVersion = String(selected.version);
     const label = element(doc, 'p', fit.label, 'fit-label'); label.dataset.fit = fit.tone;
     card.append(label, element(doc, 'p', concise(fit.reason), 'reason')); section.append(card);
