@@ -8,6 +8,7 @@ import {accountSources,allConnections,archiveConnections,capture,changeStage,kee
 import {watchInbox} from './lib/inbox';
 import type {MboxWorkerResponse,MailboxWorkerResult} from './lib/mbox.worker';
 import {startExtensionBridge} from './lib/extension-bridge';
+import {requestedExtensionId,withoutExtensionRequest} from './lib/extension-pairing';
 import type {Connection} from './lib/discover';
 import DiscoverPanel from './components/DiscoverPanel';
 import {Avatar,Dialog,EmptyState,formatDate,MightyMark,StagePill,stageLabels,Tabs} from './components/DesignPrimitives';
@@ -29,12 +30,14 @@ const stages=['saved','contacted','in_conversation','staying_in_touch'];
 const label=(s:string)=>s.replaceAll('_',' ');
 const message=(e:unknown)=>e instanceof Error?e.message:'The action could not be completed.';
 export default function App(){
- const [page,setPage]=useState<string>(authCallbackNotice?'Me':'Today'),[uid,setUid]=useState<string|null>(null),[ready,setReady]=useState(false),[sources,setSources]=useState<LocalSources>({}),[pool,setPool]=useState<Connection[]>([]),[people,setPeople]=useState<Person[]>([]),[events,setEvents]=useState<Capture[]>([]),[strategy,setStrategy]=useState(''),[notice,setNotice]=useState(authCallbackNotice||''),[busy,setBusy]=useState(''),[progress,setProgress]=useState(''),[remaining,setRemaining]=useState<number|null>(null),[modal,setModal]=useState(false),[selected,setSelected]=useState(''),[noteDrafts,setNoteDrafts]=useState<Record<string,{body:string;kind:string}>>({}),[refreshPending,setRefreshPending]=useState(false);
+ const [extensionRequest,setExtensionRequest]=useState(()=>requestedExtensionId(window.location?.href||''));
+ const extensionRequestRef=useRef(extensionRequest);extensionRequestRef.current=extensionRequest;
+ const [page,setPage]=useState<string>(authCallbackNotice||extensionRequest?'Me':'Today'),[uid,setUid]=useState<string|null>(null),[ready,setReady]=useState(false),[sources,setSources]=useState<LocalSources>({}),[pool,setPool]=useState<Connection[]>([]),[people,setPeople]=useState<Person[]>([]),[events,setEvents]=useState<Capture[]>([]),[strategy,setStrategy]=useState(''),[notice,setNotice]=useState(authCallbackNotice||''),[busy,setBusy]=useState(''),[progress,setProgress]=useState(''),[remaining,setRemaining]=useState<number|null>(null),[modal,setModal]=useState(false),[selected,setSelected]=useState(''),[noteDrafts,setNoteDrafts]=useState<Record<string,{body:string;kind:string}>>({}),[refreshPending,setRefreshPending]=useState(false);
  const [extensionId,setExtensionId]=useState(()=>localStorage.getItem('mighty-extension-id')||''),[extensionStatus,setExtensionStatus]=useState('Not connected'),[ownEmail,setOwnEmail]=useState('');
  const [accountEmail,setAccountEmail]=useState('');
  const [loadedSourcesKey,setLoadedSourcesKey]=useState('');
  const [relationshipView,setRelationshipView]=useState<RelationshipView>('List');
- const [meTab,setMeTab]=useState<MeTab>(authCallbackNotice?'Settings':'Profile');
+ const [meTab,setMeTab]=useState<MeTab>(authCallbackNotice||extensionRequest?'Settings':'Profile');
  const [personTab,setPersonTab]=useState<typeof personTabs[number]>('Context');
  const [captureOpen,setCaptureOpen]=useState(false);
  const selectedRef=useRef(selected);selectedRef.current=selected;
@@ -76,7 +79,7 @@ export default function App(){
    const nextKey=nextUid||'device-draft';
    if(localKey.current!==nextKey){
     localKey.current=nextKey;accountGeneration.current++;goalDirty.current=false;
-    setPeople([]);setEvents([]);setPool([]);setSources({});setStrategy('');setLoadedSourcesKey('');setSelected('');setNoteDrafts({});setRefreshPending(false);setModal(false);setCaptureOpen(false);setPage('Today');setRemaining(null);setOwnEmail('');setNotice('');setProgress('');
+    setPeople([]);setEvents([]);setPool([]);setSources({});setStrategy('');setLoadedSourcesKey('');setSelected('');setNoteDrafts({});setRefreshPending(false);setModal(false);setCaptureOpen(false);setPage(extensionRequestRef.current?'Me':'Today');setRemaining(null);setOwnEmail('');setNotice('');setProgress('');
    }
    setUid(nextUid);setAccountEmail(email);setReady(true);
   };
@@ -117,6 +120,19 @@ export default function App(){
   const subscription=db?.auth.onAuthStateChange(()=>void bridge.sync());
   return()=>{active=false;if(extensionBridge.current===bridge)extensionBridge.current=null;bridge.dispose();subscription?.data.subscription.unsubscribe();};
  },[extensionId]);
+ const dismissExtensionRequest=()=>{
+  setExtensionRequest(null);
+  if(window.location?.href)window.history.replaceState(window.history.state,'',withoutExtensionRequest(window.location.href));
+ };
+ const approveExtensionRequest=()=>{
+  if(!ready||!uid||!extensionRequest||!isCurrent())return;
+  try{
+   localStorage.setItem('mighty-extension-id',extensionRequest);
+   if(extensionId===extensionRequest)void extensionBridge.current?.sync();
+   else setExtensionId(extensionRequest);
+   dismissExtensionRequest();
+  }catch{setNotice('Chrome could not save this connection. Keep this page open and try again.');}
+ };
  const run=async(name:string,work:()=>Promise<void>)=>{
   if(actionLock.current||!isCurrent())return;actionLock.current=true;setBusy(name);setProgress('');setNotice('');
   try{await work();}catch(e){if(isCurrent())setNotice(message(e));}
@@ -216,6 +232,14 @@ export default function App(){
     {!uid && ready && !(page==='Me'&&meTab==='Settings') && <div className="account-entry"><span className="muted small">Local workspace</span><button type="button" className="text-button" disabled={Boolean(busy)} onClick={()=>openMe('Settings')}>Sign in<ArrowRight size={14}/></button></div>}
     {notice && <div className="notice" role="status"><span>{notice}</span>{refreshPending && <button type="button" className="text-button" disabled={Boolean(busy)} onClick={() => void retryRefresh()}>Refresh list</button>}<button className="icon-button" aria-label="Dismiss notice" onClick={() => setNotice('')}><X size={16}/></button></div>}
     {busy && <div className="import-progress" role="status"><span className="busy-dot"/><strong>{busy}</strong>{progress && <span>{progress}</span>}</div>}
+    {extensionRequest && page==='Me' && <section className="panel content-panel" aria-label="Extension connection request">
+     <h2>Connect the Mighty extension</h2>
+     <p>Allow this extension to use your Mighty account, load your saved goals and save people you choose.</p>
+     <p className="muted small">Approve only if you opened this page from your installed Mighty extension.</p>
+     <p className="muted small">Extension ID: <code>{extensionRequest}</code></p>
+     {!uid && <p>Sign in below, then return to the extension and choose Connect to Mighty.</p>}
+     <div className="row-actions"><button className="button primary" disabled={!ready||!uid} onClick={approveExtensionRequest}>Connect extension</button><button className="button secondary" onClick={dismissExtensionRequest}>Cancel connection</button></div>
+    </section>}
     {['Today','Explore','Person'].includes(page)&&<GoalSwitcher key={key} {...goals.workspace} onSelect={goals.select} busy={goals.busy}/>}
     {page === 'Today' && <>
      <header className="today-heading"><h1>{greeting}{firstName ? `, ${firstName}` : ''}.</h1></header>

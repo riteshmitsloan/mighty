@@ -1,4 +1,5 @@
 import test from'node:test';import assert from'node:assert/strict';import{readFileSync}from'node:fs';import{createRequire}from'node:module';import{resolve}from'node:path';import{fileURLToPath}from'node:url';
+import {mightyAppLink} from '../src/app-link.js';
 import{readProfile,readSearchResults,classifySearchPage,snapshot,blockedState,recentRoleStart,hasSubstantiveProfile}from'../src/profile.js';import{canonicalProfileURL,exactOrigin}from'../src/urls.js';import{goalFit,canRequestBrief}from'../src/scoring.js';import{initialSelection,toggleSelection}from'../src/selection.js';import{parseExternalMessage,isExternalSender,sessionFromVerifiedToken,validateSave,inboxPayload,matchingPending,pendingKey}from'../src/messaging.js';import type{Profile,Session}from'../src/types.js';
 const deps=process.env.MIGHTY_DEPS_ROOT||fileURLToPath(new URL('../../',import.meta.url));const{parseHTML}=createRequire(resolve(deps,'package.json'))('linkedom');
 const documentOf=(html:string)=>parseHTML(html).document as Document;const fixture=(name:string)=>documentOf(readFileSync(new URL('./fixtures/'+name,import.meta.url),'utf8'));
@@ -6,6 +7,17 @@ const profileUrl='https://www.linkedin.com/in/jordan-rivers/',searchUrl='https:/
 const rich=()=>readProfile(fixture('profile-rich.html'),profileUrl,now)!;
 const uid='12345678-1234-4234-9234-123456789abc',other='22345678-1234-4234-9234-123456789abc',operationId='32345678-1234-4234-9234-123456789abc';
 const s:Session={userId:uid,accessToken:'test-only',expiresAt:Date.parse(now)+100000,strategy:'Healthcare leaders'};
+test('pairing links preserve hosted and loopback app bases without carrying account data',()=>{
+ const id='b'.repeat(32);
+ for(const [base,expected] of [['https://riteshmitsloan.github.io/mighty/','https://riteshmitsloan.github.io/mighty/'],['http://localhost:5173','http://localhost:5173/'],['http://127.0.0.1:5173/','http://127.0.0.1:5173/']]){
+  assert.equal(mightyAppLink(base,id,false),expected+'?mighty_extension='+id+'#connect-extension');
+  assert.equal(mightyAppLink(base,id,true),expected);
+ }
+});
+test('pairing links reject invalid IDs and unsafe or credential-bearing app addresses',()=>{
+ for(const id of ['', 'a'.repeat(31), 'q'.repeat(32), 'a'.repeat(32)+'&token=private'])assert.throws(()=>mightyAppLink('http://localhost:5173',id,false),/identifier/);
+ for(const url of ['javascript:alert(1)','http://example.com/','https://user:password@example.com/','https://example.com/?access_token=private','https://example.com/#access_token=private'])assert.throws(()=>mightyAppLink(url,'a'.repeat(32),false),/address/);
+});
 test('rich rendered profile captures every required anchor kind and actual timing',()=>{const p=rich();assert.equal(p.name,'Jordan Rivers');assert.equal(p.profileReadAt,now);for(const kind of['headline','location','about','experience','education','skills','languages','certifications','timing'])assert.ok(p.anchors.some(a=>a.kind===kind),kind);assert.ok(p.anchors.some(a=>a.kind==='timing'&&a.text==='Jan 2023 – Present'));assert.ok(p.anchors.every(a=>a.sourceUrl.startsWith(profileUrl+'#')));assert.equal(p.truncated,false);});
 test('hidden text, recommendations, and scripts never become profile evidence',()=>{const text=JSON.stringify(rich());for(const excluded of['Secret hidden','Accessibility duplicate','Investment banking','Invented data','Wrong Person'])assert.ok(!text.includes(excluded),excluded);});
 test('nested experience lists do not create duplicate top-level anchors',()=>{const p=rich();assert.equal(p.anchors.filter(x=>x.kind==='experience').length,2);assert.ok(p.anchors.some(x=>x.kind==='experience'&&x.text.includes('Healthcare interoperability')));});

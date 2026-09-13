@@ -56,19 +56,44 @@ function recentActivityDate(item:Element,now:string):string|null{
  }
  return null;
 }
+/** SDUI has no h1. A generic h2 is not an identity anchor: require the profile's
+ * own verification marker inside its top card and primary content region. */
+function sduiSubject(main:Element,profileUrl:string):{heading:Element;top:Element;scope:Element}|null{
+ const primary=Array.from(main.querySelectorAll('section[aria-label="Primary content"]')).filter(rendered);
+ if(primary.length!==1)return null;
+ const scope=primary[0];
+ const cards=Array.from(scope.querySelectorAll('div[id^="com.linkedin.sdui.profile.card.ref"][id$="Topcard"],div[componentkey^="com.linkedin.sdui.profile.card.ref"][componentkey$="Topcard"]')).filter(rendered);
+ if(cards.length!==1)return null;
+ const card=cards[0],markers=Array.from(card.querySelectorAll('[componentkey^="ProfileVerificationTriggerRef-"]')).filter(rendered);
+ if(!markers.length)return null;
+ let slug:string,decoded:string;try{slug=new URL(profileUrl).pathname.slice(4,-1);decoded=decodeURIComponent(slug);}catch{return null;}
+ const expected=new Set(['ProfileVerificationTriggerRef-'+slug,'ProfileVerificationTriggerRef-'+decoded]);
+ const keys=new Set(markers.map(marker=>marker.getAttribute('componentkey')||''));
+ if(keys.size!==1||!expected.has(markers[0].getAttribute('componentkey')||''))return null;
+ // SDUI repeats this exact marker on an A and its nested DIV. Count the rendered
+ // subject h2 once, and require every wrapper to belong to that same ancestor chain.
+ const headings=[...new Set(markers.flatMap(marker=>Array.from(marker.querySelectorAll('h2')).filter(rendered)))];
+ if(headings.length!==1)return null;
+ const heading=headings[0],top=heading.closest('section');
+ if(!top||top===scope||!card.contains(top)||!rendered(top))return null;
+ if(markers.some(marker=>!marker.contains(heading)||marker.closest('section')!==top))return null;
+ return{heading,top,scope};
+}
 export function readProfile(doc:Document,url:string,now=new Date().toISOString()):Profile|null{
  const profileUrl=canonicalProfileURL(url),main=doc.querySelector('main');if(!profileUrl||!main||blockedState(doc,url))return null;
- const heading=firstRendered(main,'h1'),name=textOf(heading,Infinity);if(!name)return null;
+ const classic=firstRendered(main,'h1'),subject=classic?{heading:classic,top:classic.closest('section')||main,scope:main}:sduiSubject(main,profileUrl);
+ if(!subject)return null;
+ const{heading,top,scope}=subject,name=textOf(heading,Infinity);if(!name)return null;
  const truncationReasons:string[]=[];if(name.length>200)truncationReasons.push('name_limit');
- const top=heading?.closest('section')||main,anchors:Anchor[]=[],seen=new Set<string>();
+ const anchors:Anchor[]=[],seen=new Set<string>();
  // Preserve complete rendered evidence. Storage limits reject a whole save, never trim its facts.
  const add=(kind:AnchorKind,text:string,fragment:string,typed?:Pick<Anchor,'field'|'currentExperience'>)=>{text=text.replace(/\s+/g,' ').trim();const key=kind+'\0'+(typed?.field||'')+'\0'+text+'\0'+(typed?.currentExperience?.entryText||'');if(text&&text!==name&&!seen.has(key)){seen.add(key);anchors.push({kind,text,sourceUrl:profileUrl+'#'+fragment,observedAt:now,...typed});}};
  add('headline',textOf(firstRendered(top,'[data-field="headline"],.text-body-medium.break-words,.pv-text-details__left-panel .text-body-medium'),Infinity),'profile');
  add('location',textOf(firstRendered(top,'[data-field="location"],.text-body-small.inline.t-black--light.break-words,.pv-text-details__left-panel .text-body-small'),Infinity),'profile');
  for(const[kind,label,ids]of sections){
-  let section:Element|null=null;for(const id of ids){const exact=main.querySelector('[id="'+id+'"]');if(exact){section=exact.closest('section');if(section)break;}}
-  if(!section){const h=Array.from(main.querySelectorAll('h2,h3')).find(x=>rendered(x)&&label.test(textOf(x,100)));section=h?.closest('section')||null;}
-  if(!section||!rendered(section))continue;
+  let section:Element|null=null;for(const id of ids){const exact=scope.querySelector('[id="'+id+'"]');if(exact){section=exact.closest('section');if(section)break;}}
+  if(!section){const h=Array.from(scope.querySelectorAll('h2,h3')).find(x=>rendered(x)&&label.test(textOf(x,100)));section=h?.closest('section')||null;}
+  if(!section||!rendered(section)||(!classic&&section===scope))continue;
   const id=ids[0];
   if(kind==='activity'){
    const selector='article,[data-activity-item],[data-urn*="urn:li:activity:"],.feed-shared-update-v2';

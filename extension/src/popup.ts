@@ -1,4 +1,5 @@
 import {assessProfileGoals} from './goal-assessment.js';
+import {mightyAppLink} from './app-link.js';
 import type {AccountGoalContext} from './goal-context.js';
 import {initialSelection, toggleSelection} from './selection.js';
 import type {AnchorKind, PageSnapshot, Profile, SaveInput} from './types.js';
@@ -219,23 +220,32 @@ function render() {
 
 async function refresh(refreshGoals = false) {
   const generation = ++readGeneration;
+  const previous = state;
+  // A new page read must finish before the previous profile or selections can be saved.
+  state = null;
+  render();
   try {
-    const [status, read] = await Promise.all([send({type: 'mighty:status', refreshGoals}), send({type: 'mighty:read_active'})]);
+    const [accountResult, pageResult] = await Promise.allSettled([send({type: 'mighty:status', refreshGoals}), send({type: 'mighty:read_active'})]);
     if (generation !== readGeneration) return;
+    if (accountResult.status === 'rejected') throw accountResult.reason;
+    const status = accountResult.value;
     if (userId !== status.userId) {accountEpoch++; operations.clear(); selected.clear();}
     userId = status.userId;
     goalContext = status.connected ? status.goalContext ?? null : null;
     connected = status.connected;
-    if (status.message) {lastRefreshError = status.message; report(status.message);}
+    const readProblem = pageResult.status === 'rejected' ? 'This page could not be read. Refresh LinkedIn, then reopen Mighty.' : '';
+    if (status.message || readProblem) {lastRefreshError = status.message || readProblem; report(lastRefreshError);}
     else {if (notice.textContent === lastRefreshError) report(''); lastRefreshError = '';}
     account.replaceChildren(el('span', connected ? 'Account connected' : 'Account not connected', `account-state ${connected ? 'connected' : ''}`));
-    const link = el('a', 'Open Mighty');
-    link.href = status.appOrigin;
+    const link = el('a', connected ? 'Open Mighty' : 'Connect to Mighty');
+    link.href = mightyAppLink(status.appOrigin, chrome.runtime.id, connected);
     link.target = '_blank';
     link.rel = 'noopener noreferrer';
     account.append(link);
-    const previous = state;
-    state = read.snapshot;
+    if (pageResult.status === 'rejected') {
+      state = {kind: 'unsupported', state: 'unknown', message: readProblem};
+      selected.clear();
+    } else state = pageResult.value.snapshot;
     if (state?.kind === 'search') {
       const changed = previous?.kind !== 'search' || previous.pageUrl !== state.pageUrl;
       if (changed) selected = initialSelection(state.results);
@@ -248,6 +258,7 @@ async function refresh(refreshGoals = false) {
   } catch (error) {
     if (generation !== readGeneration) return;
     invalidateAccountView();
+    state = null; selected.clear();
     render();
     body.setAttribute('aria-busy', 'false');
     lastRefreshError = (error as Error).message; report(lastRefreshError);

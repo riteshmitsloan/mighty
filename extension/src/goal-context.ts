@@ -1,4 +1,5 @@
 import {normalizeGoal, normalizeGoalWorkspace, type Goal} from '../../src/lib/goals';
+import {AccountConnectionError} from './account-errors.js';
 import {evidenceKey} from '../../src/lib/evidence';
 import {deepFreeze} from '../../src/lib/text';
 import type {PublicConfig, Session} from './types.js';
@@ -37,7 +38,7 @@ export function accountGoalContext(userId: string, rows: unknown, loadedAt = new
     });
     const checked = normalizeGoalWorkspace({goals, activeGoalId: null}).goals;
     return deepFreeze({schemaVersion: 1, userId, goals: checked, loadedAt, key: contextKey(userId, checked)});
-  } catch {throw Error('Account goals are incompatible or incomplete. Update Mighty and reconnect; no previous goals are being used.');}
+  } catch {throw new AccountConnectionError('goals_invalid');}
 }
 /** Only called in trusted extension contexts; never accepts page-provided goals. */
 export function validateGoalContext(value: unknown, userId: string): AccountGoalContext {
@@ -48,7 +49,7 @@ export function validateGoalContext(value: unknown, userId: string): AccountGoal
     const checked = accountGoalContext(userId, context.goals.map(goal => ({id: goal.id, user_id: userId, version: goal.version, document: goal})), context.loadedAt);
     if (context.key !== checked.key) throw Error();
     return checked;
-  } catch {throw Error('Saved account goals could not be verified. Reconnect from Mighty.');}
+  } catch {throw new AccountConnectionError('goals_cache_invalid');}
 }
 export async function loadAccountGoals(session: Session, config: PublicConfig, request: typeof fetch = fetch): Promise<AccountGoalContext> {
   const endpoint = new URL(config.supabaseUrl + '/rest/v1/goals');
@@ -59,15 +60,15 @@ export async function loadAccountGoals(session: Session, config: PublicConfig, r
   endpoint.searchParams.set('limit', '101');
   let response: Response;
   try {response = await request(endpoint, {headers: {apikey: config.publishableKey, Authorization: 'Bearer ' + session.accessToken, Prefer: 'count=exact'}, signal: AbortSignal.timeout(10_000)});}
-  catch {throw Error('Account goals could not be refreshed. Reconnect from Mighty when the connection is available.');}
-  if (!response.ok) throw Error('Account goals could not be loaded. Reconnect from Mighty; no previous goals are being used.');
+  catch {throw new AccountConnectionError('goals_unavailable');}
+  if (!response.ok) throw new AccountConnectionError(response.status === 401 ? 'goals_session_rejected' : response.status === 403 ? 'goals_forbidden' : 'goals_failed');
   let rows: unknown;
-  try {rows = await response.json();} catch {throw Error('Account goals returned an unreadable response. Reconnect from Mighty.');}
+  try {rows = await response.json();} catch {throw new AccountConnectionError('goals_unreadable');}
   const context = accountGoalContext(session.userId, rows);
   const range = response.headers.get('Content-Range');
   const full = range?.match(/^0-(\d+)\/(\d+)$/);
   const complete = context.goals.length === 0 ? range === '*/0' : Boolean(full && Number(full[1]) + 1 === context.goals.length && Number(full[2]) === context.goals.length);
   // A project row cap can return fewer than requested101; exact count must establish the complete account snapshot.
-  if (!complete) throw Error('Account goals could not be loaded completely. Reconnect from Mighty; no previous goals are being used.');
+  if (!complete) throw new AccountConnectionError('goals_incomplete');
   return context;
 }

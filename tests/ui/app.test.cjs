@@ -26,6 +26,8 @@ beforeEach(()=>{
  const storage=new Map();
  Object.assign(global,{window,document:window.document,HTMLElement:window.HTMLElement,Event:window.Event,localStorage:{getItem:key=>storage.get(key)??null,setItem:(key,value)=>storage.set(key,value),removeItem:key=>storage.delete(key),key:n=>[...storage.keys()][n],get length(){return storage.size}},IS_REACT_ACT_ENVIRONMENT:true});
  window.HTMLElement.prototype.showModal=function(){this.setAttribute('open','');};window.HTMLElement.prototype.close=function(){this.removeAttribute('open');};
+ window.location={href:'https://riteshmitsloan.github.io/mighty/'};
+ window.history={state:null,replaceState(_state,_title,url){window.location.href=url;}};
  s=global.__MIGHTY_UI_TEST__={uid:'user-a',authListeners:new Set(),localWrites:[],settings:async()=>({data:{data:{strategy:'Server goal'}},error:null}),localSources:async()=>({}),allConnections:async()=>[],readRelationships:async()=>({people:[],events:[]}),saveSettings:async()=>{},savePerson:async()=> 'saved-id',capture:async()=>{},gateway:async()=>{throw Error('Unexpected gateway call')},readArchive:async()=>archive(),readResume:async()=>({text:'resume',pages:1})};
  container=document.getElementById('root');root=createRoot(container);
 });
@@ -157,6 +159,47 @@ test('clearing or correcting an extension ID cannot retain an earlier connection
  assert.match(document.querySelector('.extension-status').textContent,/32 letters/);
  await input(document.querySelector('#extension-id'),'');
  assert.match(document.querySelector('.extension-status').textContent,/Not connected/);
+});
+test('an extension link waits for approval before starting account handoff',async()=>{
+ const id='b'.repeat(32);window.location.href+='?mighty_extension='+id+'&view=account#connect-extension';
+ await boot();assert.match(text(),/Connect the Mighty extension/);
+ assert.equal(s.extensionBridgeOptions,undefined);assert.equal(localStorage.getItem('mighty-extension-id'),null);
+ await click('Connect extension');assert.equal(s.extensionBridgeOptions.extensionId,id);
+ assert.equal(localStorage.getItem('mighty-extension-id'),id);assert.doesNotMatch(text(),/Approve only if/);
+ assert.equal(window.location.href,'https://riteshmitsloan.github.io/mighty/?view=account');
+ await act(async()=>{s.extensionBridgeOptions.onStatus({connected:true});});
+ assert.match(document.querySelector('.extension-status').textContent,/Connected to your account/);
+});
+test('canceling a proposed replacement leaves the approved extension in place',async()=>{
+ const old='a'.repeat(32),proposed='b'.repeat(32);localStorage.setItem('mighty-extension-id',old);
+ window.location.href+='?mighty_extension='+proposed+'#connect-extension';await boot();
+ assert.equal(s.extensionBridgeOptions.extensionId,old);assert.equal(localStorage.getItem('mighty-extension-id'),old);
+ await click('Cancel connection');assert.equal(s.extensionBridgeOptions.extensionId,old);
+ assert.equal(localStorage.getItem('mighty-extension-id'),old);assert.doesNotMatch(window.location.href,/mighty_extension/);
+});
+test('a pairing request cannot connect before sign-in and survives a same-tab sign-in',async()=>{
+ s.uid=null;const id='c'.repeat(32);window.location.href+='?mighty_extension='+id;
+ await boot();assert.equal(button('Connect extension').disabled,true);await click('Connect extension');
+ assert.equal(s.extensionBridgeOptions,undefined);assert.equal(localStorage.getItem('mighty-extension-id'),null);
+ await switchAccount('user-a');assert.equal(button('Connect extension').disabled,false);
+ assert.equal(s.extensionBridgeOptions,undefined);await click('Connect extension');assert.equal(s.extensionBridgeOptions.extensionId,id);
+});
+test('malformed or duplicate extension IDs never replace a saved connection',async()=>{
+ const id='a'.repeat(32);localStorage.setItem('mighty-extension-id',id);
+ window.location.href+='?mighty_extension='+('b'.repeat(32))+'&mighty_extension='+('c'.repeat(32));
+ await boot();assert.equal(s.extensionBridgeOptions.extensionId,id);assert.equal(button('Connect extension'),undefined);
+ assert.equal(localStorage.getItem('mighty-extension-id'),id);
+});
+for(const nextUid of [null,'user-b'])test(`a stale Connect click cannot approve an extension after switching to ${nextUid??'signed out'}`,async()=>{
+ window.location.href+='?mighty_extension='+('d'.repeat(32));await boot();
+ const connect=props(button('Connect extension')).onClick;
+ await act(async()=>{
+  s.uid=nextUid;
+  for(const listener of s.authListeners)listener('SIGNED_IN',nextUid?{user:{id:nextUid}}:null);
+  connect();await tick();await tick();
+ });
+ assert.equal(localStorage.getItem('mighty-extension-id'),null);
+ assert.equal(s.extensionBridgeOptions,undefined);
 });
 test('switching extension IDs waits for the new extension and ignores the old callback',async()=>{
  localStorage.setItem('mighty-extension-id','a'.repeat(32));await boot();await click('Me');await click('Settings');

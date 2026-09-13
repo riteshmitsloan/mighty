@@ -1,4 +1,5 @@
 import{config,configured}from'./config.js';
+import{AccountConnectionError,accountFailure}from'./account-errors.js';
 import{createAccountSession}from'./account-session.js';
 import{loadAccountGoals}from'./goal-context.js';
 import{inboxPayload,isExternalSender,matchingPending,parseExternalMessage,pendingKey,sessionFromVerifiedToken,validSession,validateSave}from'./messaging.js';
@@ -12,9 +13,14 @@ const headers=(s:Session)=>({'apikey':config.publishableKey,Authorization:'Beare
 function status(s:Session|null,includeGoals=false){const current=validSession(s)?s:null;return{connected:Boolean(current),userId:current?.userId||null,goalCount:current?.goalContext?.goals.length??0,...(includeGoals?{goalContext:current?.goalContext??null}:{}),message:accounts.message(),configured:configured(),appOrigin:config.appOrigins[0]};}
 function broadcast(){for(const port of ports){try{port.postMessage({type:'mighty:account_changed'});}catch{ports.delete(port);}}}
 async function verifiedHandoff(accessToken:string):Promise<Session>{
- if(!configured())throw Error('The prototype is not connected to a Supabase project.');
- const response=await fetch(config.supabaseUrl+'/auth/v1/user',{headers:{apikey:config.publishableKey,Authorization:'Bearer '+accessToken},signal:AbortSignal.timeout(10000)});
- if(!response.ok)throw Error('The account session could not be verified.');let user:{id:string};try{user=await response.json();}catch{throw Error('The account session could not be verified.');}const s=sessionFromVerifiedToken(accessToken,user.id,config.supabaseUrl);
+ if(!configured())throw new AccountConnectionError('not_configured');
+ let response:Response;
+ try{response=await fetch(config.supabaseUrl+'/auth/v1/user',{headers:{apikey:config.publishableKey,Authorization:'Bearer '+accessToken},signal:AbortSignal.timeout(10000)});}
+ catch{throw new AccountConnectionError('verification_unavailable');}
+ if(!response.ok)throw new AccountConnectionError([401,403].includes(response.status)?'verification_rejected':'verification_failed');
+ let user:unknown;try{user=await response.json();}catch{throw new AccountConnectionError('verification_unreadable');}
+ if(!user||typeof user!=='object'||Array.isArray(user)||!('id'in user)||typeof user.id!=='string'||!(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(user.id)))throw new AccountConnectionError('verification_invalid');
+ const s=sessionFromVerifiedToken(accessToken,user.id,config.supabaseUrl);
  s.goalContext=await loadAccountGoals(s,config);return s;
 }
 async function deliver(save:PendingSave,s:Session){
@@ -42,7 +48,7 @@ chrome.runtime.onMessageExternal.addListener((message,sender,respond)=>{
  if(parsed.type==='status')return{ok:true,...status(await session())};
  if(parsed.type==='disconnect'){await accounts.disconnect();return{ok:true};}
  const s=await accounts.connect(()=>verifiedHandoff(parsed.accessToken));void flush(s);return{ok:true,...status(s)};
- })().then(respond).catch(()=>respond({ok:false,message:'The account handoff could not be completed. Reconnect from the app.'}));return true;
+ })().then(respond).catch(error=>respond({ok:false,...accountFailure(error)}));return true;
 });
 chrome.runtime.onConnect.addListener(port=>{if(port.name!=='mighty:popup'||port.sender?.id!==chrome.runtime.id)return;ports.add(port);port.onDisconnect.addListener(()=>ports.delete(port));});
 chrome.runtime.onMessage.addListener((message,sender,respond)=>{
@@ -55,7 +61,7 @@ chrome.runtime.onMessage.addListener((message,sender,respond)=>{
  if(old&&JSON.stringify(inboxPayload(old))!==JSON.stringify(inboxPayload(save)))throw Error('This save identifier already belongs to a different snapshot.');
  const queued:PendingSave=old||{...save,queuedAt:new Date().toISOString()};await chrome.storage.local.set({[key]:queued});await deliver(queued,s);return{ok:true,operationId:save.operationId};}
  throw Error('Unsupported extension request.');
- })().then(respond).catch((e:unknown)=>respond({ok:false,message:e instanceof Error?e.message:'The extension request could not be completed.'}));return true;
+ })().then(respond).catch((e:unknown)=>respond(message?.type==='mighty:status'?{ok:false,...accountFailure(e)}:{ok:false,message:e instanceof Error?e.message:'The extension request could not be completed.'}));return true;
 });
 
 chrome.runtime.onConnectExternal.addListener(port=>{

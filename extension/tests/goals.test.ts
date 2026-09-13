@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createAccountSession} from '../src/account-session.js';
+import {AccountConnectionError} from '../src/account-errors.js';
 import {accountGoalContext, loadAccountGoals, validateGoalContext} from '../src/goal-context.js';
 import {assessProfileGoals, renderedCandidate} from '../src/goal-assessment.js';
 import {assessCandidate} from '../../src/lib/assessment';
@@ -84,8 +85,14 @@ test('HTTP errors and incompatible responses never become a successful empty goa
 test('failed replacement handoff clears the previous account before failure', async () => {
   const storage=memory(session()),state=createAccountSession(storage,()=>{},()=>Date.parse(now)),pending=deferred<Session>();
   const job=state.connect(()=>pending.promise);await new Promise(resolve=>setImmediate(resolve));assert.equal(storage.value,null);
-  pending.reject(Error('Account goals could not be loaded.'));await assert.rejects(job,/could not be loaded/);
+  pending.reject(new AccountConnectionError('goals_failed'));await assert.rejects(job,/could not be loaded/);
   assert.equal(await state.current(),null);assert.match(state.message(),/could not be loaded/);
+});
+test('unknown connection exceptions never become saved status diagnostics',async()=>{
+  const state=createAccountSession(memory(session()),()=>{},()=>Date.parse(now));
+  await assert.rejects(state.connect(async()=>{throw Error('PRIVATE_SENTINEL arbitrary failure');}));
+  assert.equal(await state.current(),null);assert.doesNotMatch(state.message(),/PRIVATE_SENTINEL/);
+  assert.match(state.message(),/connection could not be completed/);
 });
 test('slow account A cannot restore A after B handoff or disconnect', async () => {
   const storage=memory(),state=createAccountSession(storage,()=>{},()=>Date.parse(now)),pending=deferred<Session>();

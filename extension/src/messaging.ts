@@ -1,4 +1,5 @@
 import{hasSubstantiveProfile}from'./profile.js';
+import{AccountConnectionError}from'./account-errors.js';
 import{validCurrentExperienceAnchor}from'../../src/lib/current-experience';
 import{canonicalProfileURL,exactAppURL}from'./urls.js';
 import type{PendingSave,Profile,PublicConfig,SaveInput,Session}from'./types.js';
@@ -18,10 +19,16 @@ export function parseExternalMessage(input:unknown):{type:'connect';accessToken:
  throw Error('Unsupported bridge message.');
 }
 export function sessionFromVerifiedToken(accessToken:string,verifiedUserId:string,projectUrl:string,now=Date.now()):Session{
- try{const parts=accessToken.split('.');if(parts.length!==3)throw Error();const encoded=parts[1].replace(/-/g,'+').replace(/_/g,'/');const claims=JSON.parse(atob(encoded.padEnd(Math.ceil(encoded.length/4)*4,'=')));
- if(!uuid.test(verifiedUserId)||claims.sub!==verifiedUserId||claims.iss!==projectUrl.replace(/\/$/,'')+'/auth/v1'||!Number.isSafeInteger(claims.exp)||claims.exp*1000<=now||claims.exp*1000>now+3900000)throw Error();
- return{userId:verifiedUserId,accessToken,expiresAt:claims.exp*1000,strategy:''};
- }catch{throw Error('The handoff must contain a verified, short-lived account session.');}
+ let claims:Record<string,unknown>;
+ try{const parts=accessToken.split('.');if(parts.length!==3)throw Error();const encoded=parts[1].replace(/-/g,'+').replace(/_/g,'/');claims=JSON.parse(atob(encoded.padEnd(Math.ceil(encoded.length/4)*4,'=')));
+ if(!claims||typeof claims!=='object'||Array.isArray(claims)||!Number.isSafeInteger(claims.exp))throw Error();
+ }catch{throw new AccountConnectionError('session_invalid');}
+ if(!uuid.test(verifiedUserId)||claims.sub!==verifiedUserId)throw new AccountConnectionError('session_mismatch');
+ if(claims.iss!==projectUrl.replace(/\/$/,'')+'/auth/v1')throw new AccountConnectionError('session_project_mismatch');
+ const expiresAt=Number(claims.exp)*1000;
+ if(expiresAt<=now+5000)throw new AccountConnectionError('session_expired');
+ if(expiresAt>now+3900000)throw new AccountConnectionError('session_lifetime');
+ return{userId:verifiedUserId,accessToken,expiresAt,strategy:''};
 }
 export function validSession(session:Session|null,now=Date.now()):session is Session{return Boolean(session&&session.expiresAt>now+5000);}
 export function validateSave(value:unknown,session:Session):SaveInput{

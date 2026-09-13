@@ -1,4 +1,5 @@
 import {validateGoalContext} from './goal-context.js';
+import {AccountConnectionError, accountFailure} from './account-errors.js';
 import {validSession} from './messaging.js';
 import type {Session} from './types.js';
 export interface AccountSessionStorage {read(): Promise<Session | null>; write(value: Session | null): Promise<void>}
@@ -11,7 +12,7 @@ export function createAccountSession(storage: AccountSessionStorage, changed: ()
     writes = job; return job;
   };
   const checked = (value: Session | null): Session => {
-    if (!validSession(value, now())) throw Error('Your account session expired. Reconnect from Mighty.');
+    if (!validSession(value, now())) throw new AccountConnectionError('session_expired');
     return {...value, goalContext: validateGoalContext(value.goalContext, value.userId), strategy: ''};
   };
   async function current(): Promise<Session | null> {
@@ -23,7 +24,7 @@ export function createAccountSession(storage: AccountSessionStorage, changed: ()
     if (!value) return null;
     try {return checked(value);}
     catch (error) {
-      if (ticket === generation) message = (error as Error).message;
+      if (ticket === generation) message = accountFailure(error).message;
       await write(ticket, null); changed(); return null;
     }
   }
@@ -37,12 +38,13 @@ export function createAccountSession(storage: AccountSessionStorage, changed: ()
     await write(ticket, null); changed();
     try {
       const result = checked(await load());
-      if (ticket !== generation) throw Error('A newer account handoff replaced this request.');
+      if (ticket !== generation) throw new AccountConnectionError('connection_superseded');
       await write(ticket, result);
-      if (ticket !== generation) throw Error('A newer account handoff replaced this request.');
+      if (ticket !== generation) throw new AccountConnectionError('connection_superseded');
       changed(); return result;
     } catch (error) {
-      if (ticket === generation) {message = error instanceof Error ? error.message : 'The account could not be connected.'; await write(ticket, null); changed();}
+      if (ticket !== generation) throw new AccountConnectionError('connection_superseded');
+      if (ticket === generation) {message = accountFailure(error).message; await write(ticket, null); changed();}
       throw error;
     }
   }
