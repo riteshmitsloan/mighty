@@ -1,4 +1,5 @@
 import{firstRendered,rendered,textOf}from'./dom.js';
+import{currentExperienceFields}from'./experience-fields.js';
 import{canonicalProfileURL,isSearchURL}from'./urls.js';
 import type{Anchor,AnchorKind,PageSnapshot,PageState,Profile,SearchResult}from'./types.js';
 export function blockedState(doc:Document,url:string,status=200):PageState|null{
@@ -61,7 +62,7 @@ export function readProfile(doc:Document,url:string,now=new Date().toISOString()
  const truncationReasons:string[]=[];if(name.length>200)truncationReasons.push('name_limit');
  const top=heading?.closest('section')||main,anchors:Anchor[]=[],seen=new Set<string>();
  // Preserve complete rendered evidence. Storage limits reject a whole save, never trim its facts.
- const add=(kind:AnchorKind,text:string,fragment:string)=>{text=text.replace(/\s+/g,' ').trim();if(text&&text!==name&&!seen.has(kind+'\0'+text)){seen.add(kind+'\0'+text);anchors.push({kind,text,sourceUrl:profileUrl+'#'+fragment,observedAt:now});}};
+ const add=(kind:AnchorKind,text:string,fragment:string,typed?:Pick<Anchor,'field'|'currentExperience'>)=>{text=text.replace(/\s+/g,' ').trim();const key=kind+'\0'+(typed?.field||'')+'\0'+text+'\0'+(typed?.currentExperience?.entryText||'');if(text&&text!==name&&!seen.has(key)){seen.add(key);anchors.push({kind,text,sourceUrl:profileUrl+'#'+fragment,observedAt:now,...typed});}};
  add('headline',textOf(firstRendered(top,'[data-field="headline"],.text-body-medium.break-words,.pv-text-details__left-panel .text-body-medium'),Infinity),'profile');
  add('location',textOf(firstRendered(top,'[data-field="location"],.text-body-small.inline.t-black--light.break-words,.pv-text-details__left-panel .text-body-small'),Infinity),'profile');
  for(const[kind,label,ids]of sections){
@@ -92,6 +93,7 @@ export function readProfile(doc:Document,url:string,now=new Date().toISOString()
    const bodyOnly=text.replace(/^(?:about|experience|education|skills|languages|licenses? (?:&|and) certifications?|certifications?)\s*/i,'').replace(/(?:show all(?: \d+)?[^.]*|see more|show more|add (?:experience|education|skills))$/i,'').trim();if(!bodyOnly)continue;
    add(kind,text,id);
    if(kind==='experience'||kind==='education')for(const date of dateRanges(text)){add('timing',date,id);if(kind==='experience'&&recentRoleStart(date,now))add('timing','Recent role start indicated by “'+date+'”. The rendered start date or month falls within the last 90 days.',id);}
+   if(kind==='experience')for(const field of currentExperienceFields(item,now))add('experience',field.text,id,field);
   }
  }
  const missingSections:AnchorKind[]=(['experience','education','location','skills','languages','certifications','activity'] as AnchorKind[]).filter(kind=>!anchors.some(anchor=>anchor.kind===kind));

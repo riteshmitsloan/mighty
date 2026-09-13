@@ -20,6 +20,7 @@ const input=async(e,value)=>{assert.ok(e);await act(async()=>{props(e).onChange(
 const text=()=>document.body.textContent;
 const person=(id,name,url=null)=>({id,person:name,profile_url:url,stage:'saved',context:{},created_at:'2026-09-12T12:00:00Z'});
 const archive=(count=1)=>({verifiedAccountHolder:{fullName:'Fixture Owner'},layer1:{id:'fixture',fingerprint:'fixture',profile:[],positions:[],education:[],skills:[],importedAt:'2026-09-12T00:00:00Z'},counts:{connections:count,positions:0,threads:0,receivedMessages:2,skills:0},connections:[{firstName:'Fixture',lastName:'Contact',url:'https://www.linkedin.com/in/mighty-ui-test-connection/',company:'Example Test Company',position:'Engineer'}],writingSamples:[],warnings:[]});
+const goal=(number,title)=>({id:`00000000-0000-4000-8000-${String(number).padStart(12,'0')}`,kind:'other',title,outcome:`Outcome for ${title}`,criteria:[],openQuestions:[],version:1,status:'active',createdAt:'2026-09-12T12:00:00.000Z',updatedAt:'2026-09-12T12:00:00.000Z'});
 beforeEach(()=>{
  const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
  const storage=new Map();
@@ -33,6 +34,49 @@ const boot=async()=>act(async()=>{root.render(React.createElement(App));await ti
 const openGoal=async()=>{await click('Me');await click('Goal');};
 const switchAccount=async uid=>act(async()=>{s.uid=uid;for(const f of s.authListeners)f('SIGNED_IN',uid?{user:{id:uid}}:null);await tick();await tick();});
 
+test('a saved person shows the newer sourced headline in the list and person header',async()=>{
+ const saved=person('current-person','Synthetic Current Person','https://www.linkedin.com/in/ui-current-role/');
+ const observedAt='2026-09-13T12:00:00Z';
+ const sourceUrl=saved.profile_url+'#experience',entryText='Engineering Director Fixture Labs January 2026 - Present';
+ const currentExperience={dateRange:'January 2026 - Present',entryText};
+ saved.context={position:'Chief Executive Officer',company:'Previous Company'};
+ saved.profile={source:'rendered_profile',profileUrl:saved.profile_url,profileReadAt:observedAt,truncated:false,truncationReasons:[],anchors:[
+  {kind:'headline',text:'Engineering Director at Fixture Labs',sourceUrl:saved.profile_url+'#profile',observedAt},
+  {kind:'about',text:'Building infrastructure for engineering teams.',sourceUrl:saved.profile_url+'#about',observedAt},
+  {kind:'experience',text:entryText,sourceUrl,observedAt},
+  {kind:'timing',text:currentExperience.dateRange,sourceUrl,observedAt},
+  {kind:'experience',field:'role',text:'Engineering Director',sourceUrl,observedAt,currentExperience},
+  {kind:'experience',field:'company',text:'Fixture Labs',sourceUrl,observedAt,currentExperience}]};
+ s.readRelationships=async()=>({people:[saved],events:[]});
+ await boot();await click('Relationships');
+ assert.match(document.querySelector('.relationship-row').textContent,/Engineering Director at Fixture Labs/);
+ assert.doesNotMatch(document.querySelector('.relationship-row').textContent,/Chief Executive Officer|Previous Company/);
+ await click(document.querySelector('.person-open'));
+ assert.match(document.querySelector('.person-heading').textContent,/Engineering Director at Fixture Labs/);
+ assert.doesNotMatch(document.querySelector('.person-heading').textContent,/Chief Executive Officer|Previous Company/);
+});
+test('clearing or correcting an extension ID cannot retain an earlier connection status',async()=>{
+ localStorage.setItem('mighty-extension-id','a'.repeat(32));await boot();await click('Me');await click('Settings');
+ const old=s.extensionBridgeOptions;await act(async()=>{old.onStatus({connected:true});});
+ assert.match(document.querySelector('.extension-status').textContent,/Connected to your account/);
+ await input(document.querySelector('#extension-id'),'invalid-id');
+ assert.match(document.querySelector('.extension-status').textContent,/32 letters/);
+ await act(async()=>{old.onStatus({connected:true});});
+ assert.match(document.querySelector('.extension-status').textContent,/32 letters/);
+ await input(document.querySelector('#extension-id'),'');
+ assert.match(document.querySelector('.extension-status').textContent,/Not connected/);
+});
+test('switching extension IDs waits for the new extension and ignores the old callback',async()=>{
+ localStorage.setItem('mighty-extension-id','a'.repeat(32));await boot();await click('Me');await click('Settings');
+ const old=s.extensionBridgeOptions;await act(async()=>{old.onStatus({connected:true});});
+ await input(document.querySelector('#extension-id'),'b'.repeat(32));
+ const next=s.extensionBridgeOptions;assert.notEqual(next,old);
+ assert.match(document.querySelector('.extension-status').textContent,/Connecting/);
+ await act(async()=>{old.onStatus({connected:true});});
+ assert.match(document.querySelector('.extension-status').textContent,/Connecting/);
+ await act(async()=>{next.onStatus({connected:true});});
+ assert.match(document.querySelector('.extension-status').textContent,/Connected to your account/);
+});
 test('extension goals refresh only after an account save is confirmed',async()=>{
  localStorage.setItem('mighty-extension-id','a'.repeat(32));let syncs=0;const cloud=deferred();
  s.extensionSync=async()=>{syncs++;};s.saveAccountGoal=()=>cloud.promise;
@@ -42,6 +86,68 @@ test('extension goals refresh only after an account save is confirmed',async()=>
  assert.equal(syncs,0,'An in-flight save is not confirmed.');
  await act(async()=>{cloud.resolve({});await tick();await tick();});
  assert.equal(syncs,1);assert.match(text(),/Goal saved to your account/);
+});
+test('a confirmed account goal refreshes the extension even if its final local reread fails',async()=>{
+ localStorage.setItem('mighty-extension-id','a'.repeat(32));let syncs=0,committed=false;
+ s.extensionSync=async()=>{assert.equal(committed,true);syncs++;};
+ s.saveAccountGoal=async(_uid,goal)=>{committed=true;return goal;};
+ s.readGoalWorkspace=async key=>{if(committed)throw Error('Local reread failed');return s.goalRecords?.get(key)??null;};
+ await boot();await openGoal();await input(document.querySelector('textarea'),'Confirmed account revision');
+ await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();await tick();});
+ assert.equal(committed,true);assert.equal(syncs,1);assert.match(text(),/Local reread failed/);
+});
+test('a slow extension refresh does not hold a confirmed goal save open',async()=>{
+ localStorage.setItem('mighty-extension-id','a'.repeat(32));const refresh=deferred();let started=false;
+ s.extensionSync=()=>{started=true;return refresh.promise;};
+ await boot();await openGoal();await input(document.querySelector('textarea'),'Saved while the extension reconnects');
+ try{
+  await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();await tick();});
+  assert.equal(started,true);assert.match(text(),/Goal saved to your account/);assert.equal(button('Save goal').disabled,false);
+ }finally{await act(async()=>{refresh.resolve();await tick();});}
+});
+test('selecting another active goal stays local; status changes refresh only after account save',async()=>{
+ localStorage.setItem('mighty-extension-id','a'.repeat(32));let syncs=0;const writes=[];
+ const first=goal(1,'First fixture goal'),second=goal(2,'Second fixture goal');
+ s.goalRecords=new Map([['user-a',{goals:[first,second],activeGoalId:first.id}]]);
+ s.extensionSync=async()=>{syncs++;};s.saveAccountGoal=async(uid,value)=>{writes.push({uid,value});return value;};
+ await boot();await click('Second fixture goal');assert.equal(s.goalRecords.get('user-a').activeGoalId,second.id);
+ assert.equal(syncs,0);assert.equal(writes.length,0);
+ await openGoal();await input(document.querySelector('.goal-extra select'),'paused');assert.equal(syncs,0);
+ await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();await tick();});
+ assert.equal(writes.length,1);assert.equal(writes[0].value.id,second.id);assert.equal(writes[0].value.status,'paused');assert.equal(syncs,1);
+ await input(document.querySelector('.goal-extra select'),'active');assert.equal(syncs,1);
+ await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();await tick();});
+ assert.equal(writes[1].value.status,'active');assert.equal(syncs,2);
+});
+for(const choice of ['local','remote'])test(`choosing the ${choice} conflict version never syncs until the explicit account save`,async()=>{
+ localStorage.setItem('mighty-extension-id','a'.repeat(32));let syncs=0;const writes=[];
+ const local=goal(1,'Conflicted fixture goal'),remote={...local,outcome:'Different account outcome',version:2};
+ s.goalRecords=new Map([['user-a',{goals:[local],activeGoalId:local.id}]]);s.goalConflicts=[{goalId:local.id,local,remote}];
+ s.extensionSync=async()=>{syncs++;};s.saveAccountGoal=async(uid,value)=>{writes.push({uid,value});return value;};
+ await boot();await openGoal();await click(choice==='local'?'Keep my version':'Use account version');
+ assert.equal(syncs,0);assert.equal(writes.length,0);assert.equal(s.goalConflicts.length,0);
+ await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();await tick();});
+ assert.equal(writes.length,1);assert.equal(writes[0].value.outcome,choice==='local'?local.outcome:remote.outcome);assert.equal(syncs,1);
+});
+test('copied device goals reach the extension only after their explicit account save',async()=>{
+ localStorage.setItem('mighty-extension-id','a'.repeat(32));let syncs=0;const writes=[],copied=goal(3,'Copied fixture goal');
+ s.goalRecords=new Map([['user-a',{goals:[],activeGoalId:null}]]);
+ s.prepareDeviceGoals=async uid=>({destinationUid:uid,goals:[copied],conflicts:[]});
+ s.copyDeviceGoals=async preview=>{const workspace={goals:[copied],activeGoalId:copied.id};s.goalRecords.set(preview.destinationUid,workspace);return workspace;};
+ s.extensionSync=async()=>{syncs++;};s.saveAccountGoal=async(uid,value)=>{writes.push({uid,value});return value;};
+ await boot();await openGoal();await click('Review device goals');await click('Copy selected goals');
+ assert.equal(syncs,0);assert.equal(writes.length,0);assert.match(text(),/Save a goal to sync it to your account/);
+ await click(document.querySelector('button[aria-label="Edit Copied fixture goal"]'));
+ await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();await tick();});
+ assert.equal(writes.length,1);assert.equal(writes[0].uid,'user-a');assert.equal(writes[0].value.id,copied.id);assert.equal(syncs,1);
+});
+test('a deliberate device-only goal save never refreshes account goals',async()=>{
+ localStorage.setItem('mighty-extension-id','a'.repeat(32));s.uid=null;let syncs=0,writes=0;
+ const local=goal(4,'Device fixture goal');s.goalRecords=new Map([['device-draft',{goals:[local],activeGoalId:local.id}]]);
+ s.extensionSync=async()=>{syncs++;};s.saveAccountGoal=async()=>{writes++;throw Error('Unexpected account write');};
+ await boot();await openGoal();await input(document.querySelector('textarea'),'Private device-only revision');
+ await act(async()=>{props(document.querySelector('.goal-detail-form')).onSubmit({preventDefault(){}});await tick();await tick();});
+ assert.equal(syncs,0);assert.equal(writes,0);assert.match(text(),/Goal saved on this device/);
 });
 test('a failed account goal save keeps the local edit without refreshing extension goals',async()=>{
  localStorage.setItem('mighty-extension-id','a'.repeat(32));let syncs=0;

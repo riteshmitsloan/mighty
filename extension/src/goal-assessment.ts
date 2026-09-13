@@ -1,6 +1,7 @@
 import {assessCandidate, type CandidateAssessment} from '../../src/lib/assessment';
 import {buildCandidateEvidence, type CandidateEvidence} from '../../src/lib/evidence';
 import type {Goal} from '../../src/lib/goals';
+import {validCurrentExperienceAnchor} from '../../src/lib/current-experience';
 import {validateGoalContext, type AccountGoalContext} from './goal-context.js';
 import {canRequestBrief} from './scoring.js';
 import type {PageSnapshot, Profile} from './types.js';
@@ -9,7 +10,10 @@ import type {PageSnapshot, Profile} from './types.js';
 export function renderedCandidate(profile: Profile): CandidateEvidence {
   return buildCandidateEvidence({name: profile.name, url: profile.profileUrl, sourceKind: 'profile', sourceLabel: 'Rendered LinkedIn profile',
     profileReadAt: profile.profileReadAt, completeProfile: canRequestBrief(profile), observedAt: profile.profileReadAt ?? undefined,
-    anchors: profile.anchors.map(anchor => ({...anchor, appliesTo: 'contact' as const}))});
+    anchors: profile.anchors.map(anchor => ({...anchor,
+      // Preserve raw text but refuse unsupported typed metadata before the shared engine sees it.
+      field: anchor.field === undefined ? undefined : validCurrentExperienceAnchor(anchor, profile.anchors, profile.profileUrl, profile.profileReadAt) ? anchor.field : 'context',
+      appliesTo: 'contact' as const}))});
 }
 export type ProfileGoalAssessment = {goal: Goal; assessment: CandidateAssessment};
 export type GoalAssessmentResult = {state: 'ready'; candidate: CandidateEvidence; assessments: readonly ProfileGoalAssessment[]; contextKey: string}

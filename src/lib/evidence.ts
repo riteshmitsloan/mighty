@@ -1,5 +1,6 @@
 import type {CompanyOverlap} from './company-evidence';
 import type {LocalSources} from './workspace';
+import type {CurrentExperience} from './current-experience';
 import {cleanText, contentFingerprint, deepFreeze, stableStringify, stripQuotedRepliesAndSignature} from './text';
 
 export type EvidenceField = 'name' | 'company' | 'role' | 'industry' | 'location' | 'stage' | 'check_size' | 'education' | 'skill' | 'email' | 'url' | 'context' | 'custom' | 'writing' | 'proof_point';
@@ -31,6 +32,7 @@ export interface EvidenceAnchor {
   readonly field?: EvidenceField;
   readonly appliesTo?: 'contact' | 'opportunity';
   readonly polarity?: 'positive' | 'negative';
+  readonly currentExperience?: CurrentExperience;
 }
 export interface CandidateInput {
   readonly key?: string;

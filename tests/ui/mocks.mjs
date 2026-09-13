@@ -12,7 +12,7 @@ export const appDependencyStubs = {
     export const addLocalGoal=upsert;
     export const selectLocalGoal=async(key,id)=>{const next={...records().get(key),activeGoalId:id};records().set(key,next);return next;};
   `,
-  './lib/device-goals': `export const deviceGoalHandoff={prepare:async()=>({goals:[],conflicts:[]}),copy:async()=>({goals:[],activeGoalId:null})};`,
+  './lib/device-goals': `${state} export const deviceGoalHandoff={prepare:(...args)=>state().prepareDeviceGoals?.(...args)??Promise.resolve({goals:[],conflicts:[]}),copy:(...args)=>state().copyDeviceGoals?.(...args)??Promise.resolve({goals:[],activeGoalId:null})};`,
   './lib/relationship-context': `${state}
     export const normalizeCandidateObservation=value=>({...value,goalId:value.goalId??null});
     export const normalizeGoalInteraction=value=>({...value,goalId:value.goalId??null,goalVersion:value.goalVersion??null,dueAt:value.dueAt??null});
@@ -24,13 +24,13 @@ export const appDependencyStubs = {
   `,
   './lib/goal-store': `${state}
     const records=()=>state().goalRecords??=(new Map());
-    export class GoalConflictError extends Error {}
-    export const readGoalWorkspace=async key=>records().get(key)??null;
+    export class GoalConflictError extends Error {constructor(conflicts,workspace){super('Choose which goal version to keep.');this.conflicts=conflicts;this.workspace=workspace;}}
+    export const readGoalWorkspace=async key=>state().readGoalWorkspace?state().readGoalWorkspace(key):records().get(key)??null;
     export const saveGoalWorkspace=async(key,workspace)=>{records().set(key,workspace);(state().goalWrites??=[]).push({key,workspace});};
-    export const loadAccountGoals=async key=>records().get(key)??{goals:[],activeGoalId:null};
-    export const readGoalSyncState=async()=>({versions:{},conflicts:[]});
+    export const loadAccountGoals=async key=>{const workspace=records().get(key)??{goals:[],activeGoalId:null};if(state().goalConflicts?.length)throw new GoalConflictError(state().goalConflicts,workspace);return workspace;};
+    export const readGoalSyncState=async()=>({versions:{},conflicts:state().goalConflicts??[]});
     export const saveAccountGoal=async(uid,goal)=>state().saveAccountGoal?state().saveAccountGoal(uid,goal):goal;
-    export const resolveGoalConflict=async()=>{};
+    export const resolveGoalConflict=async(key,id,choice)=>{const conflict=state().goalConflicts?.find(row=>row.goalId===id);if(!conflict)throw Error('No such conflict.');const old=records().get(key);const next={...old,goals:old.goals.map(goal=>goal.id===id&&choice==='remote'?conflict.remote:goal)};records().set(key,next);state().goalConflicts=state().goalConflicts.filter(row=>row.goalId!==id);return next;};
   `,
   './lib/platform': `${state}
     export const authCallbackNotice = null;

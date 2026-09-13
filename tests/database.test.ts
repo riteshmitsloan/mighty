@@ -2,6 +2,11 @@ import test from 'node:test';import assert from 'node:assert/strict';import {rea
 import {buildSavedPersonEvidence} from '../src/lib/person-evidence';
 import {readRelationshipData} from '../src/lib/data-access';
 import {MemoryServer} from './fake-client';
+import {assessCandidate} from '../src/lib/assessment';
+import type {Goal} from '../src/lib/goals';
+import {renderedCandidate} from '../extension/src/goal-assessment';
+import {inboxPayload} from '../extension/src/messaging';
+import type {Profile} from '../extension/src/types';
 const MIGRATIONS_ROOT=process.env.MIGRATIONS_ROOT ?? fileURLToPath(new URL('../supabase/migrations/',import.meta.url));
 const A='11111111-1111-4111-8111-111111111111',B='22222222-2222-4222-8222-222222222222',P='33333333-3333-4333-8333-333333333333';
 test('all migrations apply and database security/budgets enforce the brief',async t=>{
@@ -98,6 +103,56 @@ async function moduleAssertions(db: PGlite, t: import('node:test').TestContext) 
    const evidence=buildSavedPersonEvidence(loaded);
    assert.equal(evidence.completeProfile,true);assert.equal(evidence.profileReadAt,at);
    assert.deepEqual(evidence.claims.filter(c=>c.sourceKind==='profile').map(c=>c.text),snapshot.anchors.map(a=>a.text));
+  });
+ });
+ await t.test('dated role evidence survives the extension payload, SQL inbox and account read without retaining an old executive route',async()=>{
+  await asUser(A,async()=>{
+   const url='https://www.linkedin.com/in/dated-role-contract/',at='2026-09-12T14:00:00Z',savedAt='2026-09-01T12:00:00Z';
+   const sourceUrl=url+'#experience',entryText='Job title Engineering Director Company Fixture Labs January 2026 - Present';
+   const currentExperience={dateRange:'January 2026 - Present',entryText};
+   const profile:Profile={name:'Module Person',profileUrl:url,profileReadAt:at,truncated:false,truncationReasons:[],anchors:[
+    {kind:'headline',text:'Working on infrastructure',sourceUrl:url+'#headline',observedAt:at},
+    {kind:'experience',text:entryText,sourceUrl,observedAt:at},
+    {kind:'timing',text:currentExperience.dateRange,sourceUrl,observedAt:at},
+    {kind:'experience',field:'role',text:'Engineering Director',sourceUrl,observedAt:at,currentExperience},
+    {kind:'experience',field:'company',text:'Fixture Labs',sourceUrl,observedAt:at,currentExperience}]};
+   const originalContext={source:'archive',position:'Chief Executive Officer',company:'Previous Company'};
+   await db.query(`insert into public.outreach_log(user_id,person,profile_url,context,created_at) values($1,$2,$3,$4::jsonb,$5)`,[A,profile.name,url,JSON.stringify(originalContext),savedAt]);
+   const payload=inboxPayload({operationId:crypto.randomUUID(),userId:A,profile,source:'rendered_profile'});
+   const inbox=(await db.query<any>(`insert into public.outreach_inbox(user_id,operation_id,profile_url,person,snapshot,profile_read_at) values($1,$2,$3,$4,$5::jsonb,$6) returning id`,[payload.user_id,payload.operation_id,payload.profile_url,payload.person,JSON.stringify(payload.snapshot),payload.profile_read_at])).rows[0].id;
+   const relationship=await consume(inbox);
+   const people=(await db.query<any>('select * from public.outreach_log where id=$1',[relationship])).rows;
+   const reads=(await db.query<any>('select * from public.profile_reads where relationship_id=$1',[relationship])).rows;
+   assert.deepEqual(people[0].context,originalContext);
+   assert.deepEqual(reads[0].snapshot,payload.snapshot);
+   const server=new MemoryServer({outreach_log:people,profile_reads:reads});server.actor=A;
+   const loaded=(await readRelationshipData(server.client,A)).people[0],saved=buildSavedPersonEvidence(loaded);
+   assert.equal(saved.completeProfile,true);
+   assert.deepEqual(saved.claims.filter(c=>c.sourceKind==='profile').map(c=>c.text),profile.anchors.map(a=>a.text));
+   assert.deepEqual(saved.claims.filter(c=>c.field==='role').map(c=>c.text),['Engineering Director']);
+   assert.deepEqual(saved.claims.filter(c=>c.field==='company').map(c=>c.text),['Fixture Labs']);
+   assert.equal(saved.claims.find(c=>c.text==='Chief Executive Officer')?.sourceLabel,'Previously saved role');
+   assert.equal(saved.claims.find(c=>c.text==='Previous Company')?.field,'context');
+   const goal:Goal={id:'career-contract',kind:'career',title:'Engineering leadership',outcome:'Find an engineering leadership opportunity',criteria:[
+    {id:'role',field:'role',label:'Engineering Director opportunity',terms:['Engineering Director'],importance:'required',appliesTo:'opportunity',origin:'user'},
+    {id:'industry',field:'industry',label:'FMCG experience',terms:['FMCG'],importance:'preferred',appliesTo:'contact',origin:'user'}],
+    openQuestions:[],version:1,status:'active',createdAt:savedAt,updatedAt:savedAt};
+   const fromApp=assessCandidate(goal,saved),fromExtension=assessCandidate(goal,renderedCandidate(profile));
+   const verdict=(result:typeof fromApp)=>({status:result.status,isMatch:result.isMatch,criteria:result.criteria.map(c=>({id:c.criterionId,status:c.status})),routes:result.contactRoutes.map(r=>r.kind),reasons:result.reasons,unknowns:result.unknowns});
+   assert.deepEqual(verdict(fromApp),verdict(fromExtension));
+   assert.deepEqual(fromApp.contactRoutes.map(r=>r.kind),['peer']);
+   assert.ok(fromApp.criteria.every(c=>c.status==='unknown'));
+   // A first extension save is created after its read; there is no old company to retire.
+   const firstUrl='https://www.linkedin.com/in/dated-first-save/';
+   const firstProfile={...profile,profileUrl:firstUrl,anchors:profile.anchors.map(anchor=>({...anchor,sourceUrl:anchor.sourceUrl.replace(url,firstUrl)}))};
+   const firstPayload=inboxPayload({operationId:crypto.randomUUID(),userId:A,profile:firstProfile,source:'rendered_profile'});
+   const firstId=await consume(await enqueue(firstPayload.snapshot,firstPayload.profile_read_at,firstUrl));
+   const firstRows=(await db.query<any>('select * from public.outreach_log where id=$1',[firstId])).rows;
+   const firstReads=(await db.query<any>('select * from public.profile_reads where relationship_id=$1',[firstId])).rows;
+   const firstServer=new MemoryServer({outreach_log:firstRows,profile_reads:firstReads});firstServer.actor=A;
+   const firstEvidence=buildSavedPersonEvidence((await readRelationshipData(firstServer.client,A)).people[0]);
+   assert.equal(firstEvidence.company,'Fixture Labs');
+   assert.equal(firstEvidence.claims.some(c=>c.sourceLabel.startsWith('Previously saved')),false);
   });
  });
  await t.test('inbox consumption is idempotent and incomplete search saves create no fake profile read',async()=>{

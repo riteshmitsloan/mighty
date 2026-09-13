@@ -3,15 +3,14 @@ import type {Goal} from '../lib/goals';
 import {completedCommitmentIds, goalEventLabel, isCommitment, isCompletion} from '../lib/relationship-events';
 import {ArrowRight, Check, ChevronRight, Clock3, Plus, Search} from 'lucide-react';
 import type {Capture, Person} from '../lib/workspace';
+import {savedPersonHeadline} from '../lib/person-evidence';
 import {Avatar, EmptyState, formatDate, StagePill, stageLabels, Tabs} from './DesignPrimitives';
 
 export const relationshipViews = ['List', 'Board', 'Timeline'] as const;
 export type RelationshipView = typeof relationshipViews[number];
 const stages = Object.keys(stageLabels);
 const eventLabels: Record<string, string> = {note: 'Note captured', contacted: 'Reached out', replied: 'Reply recorded', coffee_chat: 'Conversation captured', promise_made: 'Promise made', promise_kept: 'Promise kept', next_step: 'Next step recorded', next_step_completed: 'Next step completed', saved: 'Person saved'};
-export function personHeadline(person: Person) {
-  return [person.context.position, person.context.company].filter(value => typeof value === 'string' && value).join(' · ') || (typeof person.context.searchHeadline === 'string' ? person.context.searchHeadline : '');
-}
+export const personHeadline = savedPersonHeadline;
 
 type Props = {
   people: Person[]; events: Capture[]; strategy: string; view: RelationshipView; busy: boolean;

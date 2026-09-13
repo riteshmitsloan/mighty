@@ -82,7 +82,7 @@ Body:
 }
 ```
 
-There is no top-level source column. Search snapshots always have null profile_read_at and no anchors. Incomplete real profile snapshots retain anchors but have null profile_read_at. Anchor shape: {kind,text,sourceUrl,observedAt}.
+There is no top-level source column. Search snapshots always have null profile_read_at and no anchors. Incomplete real profile snapshots retain anchors but have null profile_read_at. The ordinary anchor shape is {kind,text,sourceUrl,observedAt}. Narrow current-experience fields may additionally carry `field:'role'|'company'` and `currentExperience:{dateRange,entryText}`, as specified below.
 
 The extension expects own-account RLS, active-account inserts, and UNIQUE(user_id,operation_id). The app/database own consumption and relationship deduplication. No extension code writes outreach_log, profile_reads, stored facts, or ai_call_log.
 
@@ -90,7 +90,7 @@ The extension uses a 49,152-byte profile limit below the database's 60,000-byte 
 
 ## Font and browser verification
 
-The existing app font has not been supplied. The popup uses system fonts. public/assets/README.txt documents assets/mighty-ui.woff2 as an integration placeholder; the manifest references no missing asset.
+The app font is bundled at assets/mighty-ui.woff2 with its license and declared in web_accessible_resources. The popup loads only packaged assets.
 
 Tests use synthetic HTML fixtures only. Live LinkedIn layouts, unpacked-extension lifecycle, clipboard/browser permissions, actual account handoff, and database writes still need root's browser QA and configured project. No live account or LinkedIn operation was performed by this prototype task.
 
@@ -106,7 +106,7 @@ The search-result reader still has its existing explicit name/subtitle limits; s
 
 Validation uses rendered HTML fixtures, the actual save validator, strict TypeScript checking, and the extension build. It does not claim a real LinkedIn session or real Chrome reload/save acceptance run.
 
-The app font is bundled at assets/mighty-ui.woff2 with its license. Run tools/build-zip.sh from the root to regenerate both the versioned zip and current download. Tests are synthetic; no sample people are included at runtime.
+Run tools/build-zip.sh from the root to regenerate both the versioned zip and current download. Tests are synthetic; no sample people are included at runtime.
 
 ## Saved goal assessment and account isolation
 
@@ -121,3 +121,17 @@ The extension imports `assessCandidate`, `buildCandidateEvidence`, and goal vali
 This is a **profile-evidence-only assessment**. Self résumé/archive facts stay in Mighty and shared-employer routes cannot be established here. All captured anchors keep their complete text, source URL, and observation time. Untyped headlines, About, and experience prose remain context, not verified current roles, employers, industries, investment stages, or check sizes. Explicit rendered location is a contact fact and never establishes opportunity geography. A headline such as “Exploring CEO roles” does not create a hiring/peer route. Skills/education and explicit custom-context criteria can support their own stated criteria; missing typed facts stay unknown. Search snippets, headline-only reads, blocked pages and oversized/incomplete profile reads are never assessed.
 
 Tests exercise the real shared engine, rendered HTML fixtures, popup DOM, and a mocked worker runtime/Auth/REST/storage boundary. They verify account and version changes, failed refresh, malformed/foreign rows, source preservation, Save isolation and immediate content reinjection. They do not establish real LinkedIn DOM stability, native Chrome reload behavior or a live signed-in extension acceptance run. No new host permissions, automatic messages, ambient capture, or provider calls are introduced.
+
+## Narrow structured-field support (September 13)
+
+This parser can promote explicit visible current-role and employer fields in a single, ungrouped Experience list item. It accepts `itemprop="jobTitle"` for a role; an unambiguous visible `itemprop="name"` inside `itemprop="worksFor"`, or a text-only `worksFor` element, for an employer. Direct `dl > dt/dd` pairs can label a role exactly “Job title”, “Role”, or “Position”, and an employer exactly “Company” or “Employer”, ignoring case and normalized whitespace. Generic divs, the first bold string, headlines, prose, attributes without visible text, and company-name taxonomies are not role/industry extraction rules.
+
+The same entry must contain one unique explicit date range ending “Present” or “Current”, separately rendered as an entire visible field. An impossible or future start, past end date, contradictory field/date, nested role entry, hidden source, malformed definition list, or ambiguous employer structure refuses promotion. Multiple separate current entries can each contribute their own facts. The parser does not choose a primary employer, assert exclusivity, establish hiring authority or a vacancy, or turn contact residence into opportunity location. Year-only current ranges do not imply a recent start.
+
+Each added `experience` anchor retains the exact normalized field text, original source URL and observation timestamp, plus `currentExperience:{dateRange,entryText}`. The ordinary untyped full entry and separate exact timing anchor remain present. The shared, browser-safe `src/lib/current-experience.ts` gate requires these matching companions and allows only role/company fields bound to experience, positive contact scope and a valid current date. The save boundary rejects invalid metadata; local assessment keeps unsupported typed text as context. A completed read is still required for assessment.
+
+A complete, newer rendered profile with matching identity can retire an earlier saved role or company from current assessment. The original database context stays unchanged. Earlier values remain available as historical context with their saved timestamp. Partial, undated, stale or unverified reads cannot retire saved facts. An actual migration-backed inbox test verifies that typed provenance survives account storage and the app matches the extension's assessment.
+
+Typed field text is limited to 200 characters, its date range to 80, and the full source entry to 8,000. Exceeding these limits refuses only typed promotion while retaining the original raw evidence. The independent whole-snapshot UTF-8 limit still refuses an oversized save in full, including all provenance, rather than silently shortening the source.
+
+`tests/fixtures/profile-structured-current.html` is a **synthetic semantic fixture**, not a captured LinkedIn layout. It proves the parser, shared goal assessment and inbox payload contract. The existing generic `profile-rich.html` deliberately remains untyped with all 14 original anchors. **Native LinkedIn layout coverage remains unverified.** This support adds no permissions, ambient collection, hidden-page reads, provider calls or automatic messaging.

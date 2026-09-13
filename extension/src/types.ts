@@ -1,7 +1,8 @@
 import type {AccountGoalContext} from './goal-context.js';
+import type {CurrentExperience} from '../../src/lib/current-experience';
 export const PROTOCOL=1;
 export type AnchorKind='headline'|'location'|'about'|'experience'|'education'|'skills'|'languages'|'certifications'|'activity'|'timing';
-export type Anchor={kind:AnchorKind;text:string;sourceUrl:string;observedAt:string};
+export type Anchor={kind:AnchorKind;text:string;sourceUrl:string;observedAt:string;field?:'role'|'company';currentExperience?:CurrentExperience};
 export type Profile={profileUrl:string;name:string;anchors:Anchor[];profileReadAt:string|null;truncated:boolean;truncationReasons:string[];missingSections?:AnchorKind[]};
 export type SearchResult={profileUrl:string;name:string;subtitle:string;profileReadAt:null;truncated:boolean};
 export type PageState='ready'|'empty'|'blocked'|'auth_required'|'unknown';
